@@ -1,0 +1,5 @@
+* text=auto eol=lf
+
+*.vsix binary
+*.tgz binary
+*.png binary

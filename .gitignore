@@ -1,0 +1,28 @@
+# 构建产物
+dist/
+*.vsix
+!/updates/*.vsix
+*.tgz
+
+# Python / Node
+__pycache__/
+*.pyc
+node_modules/
+
+# 凭据与运行时状态，绝不提交
+*.env
+.env*
+relay-state/
+state/
+*.key
+*private*.pem
+
+# 日志与本地工具
+*.log
+.claude/
+.vscode-test/
+.idea/
+.DS_Store
+
+# 与项目无关的本地输出目录
+/outputs/

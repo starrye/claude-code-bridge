@@ -1,0 +1,26 @@
+# Agent Bridge 中继的 systemd 服务。装法:
+#   sudo cp deploy/agent-bridge-relay.service /etc/systemd/system/
+#   sudo vi /etc/systemd/system/agent-bridge-relay.service   # 核对下面的 User / 路径 / RELAY_ENV
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now agent-bridge-relay
+# 看状态:  systemctl status agent-bridge-relay
+# 看日志:  journalctl -u agent-bridge-relay -f
+# 发版本:  cd /opt/agent-bridge && git pull && sudo systemctl restart agent-bridge-relay
+
+[Unit]
+Description=Agent Bridge relay
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# 用部署代码的那个账号运行,不要用 root;这个账号要能读 TLS 证书和私钥
+User=agentbridge
+WorkingDirectory=/opt/agent-bridge
+# relay.env 的位置。不写这行则用 run-relay.sh 的默认值 /etc/agent-bridge/relay.env
+Environment=RELAY_ENV=/opt/agent-bridge/run/relay.env
+ExecStart=/opt/agent-bridge/deploy/run-relay.sh
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

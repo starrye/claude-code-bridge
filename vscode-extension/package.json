@@ -1,0 +1,76 @@
+{
+  "name": "agent-bridge",
+  "displayName": "Agent Bridge",
+  "description": "一键启动 Bridge 与中继客户端，让手机通过飞书远程操作本机的 Claude Code",
+  "version": "0.6.4",
+  "publisher": "starrye",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/starrye/claude-code-bridge.git"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "extensionKind": [
+    "workspace"
+  ],
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./extension.js",
+  "scripts": {
+    "test": "node --test test/",
+    "build": "python3 scripts/build_vsix.py"
+  },
+  "contributes": {
+    "commands": [
+      { "command": "agentBridge.menu", "title": "Agent Bridge: 打开菜单" },
+      { "command": "agentBridge.start", "title": "Agent Bridge: 启动" },
+      { "command": "agentBridge.stop", "title": "Agent Bridge: 停止" },
+      { "command": "agentBridge.restart", "title": "Agent Bridge: 重启" },
+      { "command": "agentBridge.rePair", "title": "Agent Bridge: 重新绑定手机" },
+      { "command": "agentBridge.showQr", "title": "Agent Bridge: 显示绑定二维码" },
+      { "command": "agentBridge.showLog", "title": "Agent Bridge: 查看日志" },
+      { "command": "agentBridge.checkUpdate", "title": "Agent Bridge: 检查更新" }
+    ],
+    "configuration": {
+      "title": "Agent Bridge",
+      "properties": {
+        "agentBridge.relayAddress": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "中继服务器地址，形如 `https://relay.example.com:9010`（由部署中继的管理员提供）。也可写 `主机:端口`（明文隧道，仅用于内网或测试）。"
+        },
+        "agentBridge.autoStart": {
+          "type": "boolean",
+          "default": true,
+          "description": "VS Code 启动后自动启动 Bridge 和中继客户端（需已设置中继地址）。"
+        },
+        "agentBridge.computerName": {
+          "scope": "machine",
+          "type": "string",
+          "default": "",
+          "markdownDescription": "手机上显示的电脑名称，实际显示为 `名称@当前文件夹名`；留空则名称用主机名。同一个飞书账号可以绑定多台电脑（比如连接了多个远程容器），容器的主机名是一串随机字符，**有多窗口需求时强烈建议设置**，手机上才分得清。只在绑定时上报一次，改名后需要“重新绑定手机”才生效。"
+        },
+        "agentBridge.bridgePort": {
+          "scope": "machine",
+          "type": "number",
+          "default": 8787,
+          "minimum": 1024,
+          "maximum": 65535,
+          "description": "Bridge 在本机监听的端口（仅 127.0.0.1）。"
+        },
+        "agentBridge.claudePath": {
+          "scope": "machine",
+          "type": "string",
+          "default": "",
+          "description": "claude 命令的路径，留空则从 PATH 查找。"
+        }
+      }
+    }
+  }
+}

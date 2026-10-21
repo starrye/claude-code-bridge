@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+<meta name="referrer" content="no-referrer">
+<title>Agent Bridge</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<section id="login" hidden>
+  <form id="loginForm" autocomplete="off">
+    <h1>Agent Bridge</h1>
+    <p>输入访问令牌以连接你的设备。令牌只保存在这个浏览器里。</p>
+    <input id="tokenInput" type="password" placeholder="访问令牌" required>
+    <button type="submit">连接</button>
+    <a id="feishuBtn" class="btn" href="/auth/feishu/start" hidden>用飞书登录</a>
+    <p id="loginError" class="error"></p>
+  </form>
+</section>
+
+<div id="app" hidden>
+  <aside id="sidebar">
+    <header>
+      <strong>Agent Bridge</strong>
+    </header>
+    <div id="computers" hidden>
+      <button id="computerBtn" type="button" aria-haspopup="listbox" aria-expanded="false" aria-label="切换电脑"></button>
+      <ul id="computerList" role="listbox" hidden></ul>
+    </div>
+    <button id="newBtn" type="button" class="navnew"><span class="ico"></span>新对话</button>
+    <div class="navlabel">最近</div>
+    <ul id="sessions"></ul>
+    <div id="hostLine" hidden></div>
+    <footer><button id="logoutBtn" type="button" class="link">退出</button></footer>
+  </aside>
+  <div id="scrim"></div>
+
+  <main>
+    <header id="top">
+      <button id="menuBtn" type="button" aria-label="会话列表">☰</button>
+      <div id="titleBox">
+        <div id="title">未选择会话</div>
+        <div id="subtitle"></div>
+      </div>
+      <button id="newTopBtn" type="button" aria-label="新对话"></button>
+    </header>
+
+    <div id="offline" hidden>电脑端 Bridge 没有连接。请确认电脑上的 Bridge 和连接器正在运行。</div>
+    <div id="branchbar"></div>
+    <div id="banners"></div>
+    <div id="hero" hidden>
+      <div class="heroMark"></div>
+      <h2>Agent Bridge</h2>
+      <button id="cwdBtn" type="button" class="chip"></button>
+    </div>
+    <div id="messages" role="log"></div>
+    <div id="approvals"></div>
+
+    <form id="composer">
+      <div id="floatingPicker" role="listbox" hidden></div>
+      <div id="slashMenu" role="listbox" aria-label="命令" hidden></div>
+      <div id="box">
+        <div id="attachments" hidden></div>
+        <div id="tokens" hidden></div>
+        <textarea id="input" rows="1" placeholder="发送消息…" enterkeyhint="send"></textarea>
+        <div id="boxbar">
+          <div id="barLeft">
+            <button id="attachBtn" type="button" aria-label="添加图片" title="添加图片"></button>
+            <input id="fileInput" type="file" accept="image/*" multiple hidden>
+            <button id="slashBtn" type="button" class="barIcon" aria-label="命令与设置" title="命令与设置"></button>
+            <span id="usageRing" class="barIcon" role="button" tabindex="0" aria-label="上下文用量" hidden></span>
+            <span id="elapsed" class="barStat" title="本次任务已运行" hidden></span>
+            <button id="modelChip" type="button" class="chipBtn" aria-label="模型与强度"></button>
+            <div id="modeWrap">
+              <button id="modeBtn" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="权限模式"></button>
+              <div id="modeMenu" role="menu" hidden></div>
+            </div>
+          </div>
+          <button id="sendBtn" type="submit" aria-label="发送" disabled></button>
+        </div>
+      </div>
+    </form>
+  </main>
+
+  <div id="enrollPanel" hidden>
+    <div class="sheet">
+      <h2>绑定这台电脑</h2>
+      <p id="enrollText" class="hint"></p>
+      <p class="hint">确认校验码与电脑终端上显示的一致,再点绑定。校验码不一致说明这不是你的电脑,请取消。</p>
+      <p id="enrollError" class="error"></p>
+      <div class="row">
+        <button id="enrollCancel" type="button" class="link">取消</button>
+        <button id="enrollOk" type="button">绑定</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="pairPanel" hidden>
+    <form class="sheet" id="pairForm" autocomplete="off">
+      <h2>绑定你的电脑</h2>
+      <p class="hint">在你自己的电脑上向管理员取得配对码,输入后,这台电脑会加入这个飞书账号。</p>
+      <input id="pairInput" placeholder="配对码" autocapitalize="characters" spellcheck="false" required>
+      <p id="pairError" class="error"></p>
+      <div class="row"><button type="submit">绑定</button></div>
+    </form>
+  </div>
+
+
+  <div id="newPanel" hidden>
+    <div class="sheet">
+      <h2>新会话</h2>
+      <label>工作目录
+        <select id="cwdSel"></select>
+      </label>
+      <p class="hint">只能从已有会话用过的目录中选择。</p>
+      <div class="row">
+        <button id="newCancel" type="button" class="link">取消</button>
+        <button id="newOk" type="button">创建</button>
+      </div>
+    </div>
+  </div>
+</div>
+<div id="toast" role="status" hidden></div>
+<script src="/markdown.js"></script>
+<script src="/app.js"></script>
+</body>
+</html>
