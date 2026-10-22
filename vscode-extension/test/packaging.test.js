@@ -18,7 +18,7 @@ function requiredFiles(file) {
   const source = fs.readFileSync(path.join(ROOT, file), 'utf8');
   return [...source.matchAll(/require\('(\.{1,2}\/[^']+)'\)/g)].map((m) => {
     const target = path.resolve(dir, m[1]);
-    return path.relative(ROOT, fs.existsSync(`${target}.js`) ? `${target}.js` : target);
+    return path.relative(ROOT, fs.existsSync(`${target}.js`) ? `${target}.js` : target).split(path.sep).join('/');
   });
 }
 

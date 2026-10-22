@@ -68,7 +68,7 @@
           "scope": "machine",
           "type": "string",
           "default": "",
-          "description": "claude 命令的路径，留空则从 PATH 查找。"
+          "description": "claude 命令的路径。留空时优先使用 Claude Code 扩展自带的最新版本（和编辑器面板同一个版本），找不到再从 PATH 查找。"
         }
       }
     }

@@ -24,11 +24,11 @@ const BUILTINS = [
 const cache = new Map();
 const pending = new Map();                              // key -> promise of the running probe
 
-const claudeBin = () => process.env.CLAUDE_BIN || 'claude';
+const { claudeBin } = require('./claude-bin');
 const HIDDEN_PREFIXES = ['CLAUDE_CODE_', 'CLAUDE_AGENT_SDK', 'RELAY_', 'FEISHU_', 'BRIDGE_'];
 
 function probeEnv() {
-  return Object.fromEntries(Object.entries(process.env).filter(([k]) => !HIDDEN_PREFIXES.some((p) => k.startsWith(p))
+  return Object.fromEntries(Object.entries(process.env).filter(([k]) => k === 'CLAUDE_CODE_GIT_BASH_PATH' || !HIDDEN_PREFIXES.some((p) => k.startsWith(p))
     && k !== 'CLAUDECODE' && k !== 'CLAUDE_PID' && k !== 'ELECTRON_RUN_AS_NODE'));
 }
 

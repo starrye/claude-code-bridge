@@ -19,7 +19,7 @@ from pathlib import Path
 from xml.sax.saxutils import escape
 
 ROOT = Path(__file__).resolve().parent.parent
-EXTENSION_FILES = ["extension.js", "README.md", "lib/supervisor.js", "lib/pairing-html.js", "lib/updater.js", "lib/naming.js"]
+EXTENSION_FILES = ["extension.js", "README.md", "lib/supervisor.js", "lib/pairing-html.js", "lib/updater.js", "lib/naming.js", "lib/claude-locate.js"]
 CONTENT_TYPES = {
     ".json": "application/json", ".js": "application/javascript", ".md": "text/markdown",
     ".py": "text/x-python", ".html": "text/html", ".css": "text/css", ".vsixmanifest": "text/xml",

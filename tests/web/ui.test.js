@@ -111,10 +111,11 @@ async function main() {
   assert.strictEqual((await windowCall("add", work)).status, 200); assert.strictEqual((await windowCall("add", win2)).status, 200);
   w.document.dispatchEvent(new w.Event("visibilitychange"));
   await until(() => names().length === 2, "second window listed");
-  assert.deepStrictEqual(names(), ["work", "win2"]); ok("a second window is listed even with no session yet");
+  // folders are ordered by path, not by when each window registered (that made the list jump around on the phone)
+  assert.deepStrictEqual(names(), ["win2", "work"]); ok("a second window is listed even with no session yet, in a stable order");
   assert(/暂无会话/.test($("sessions").textContent)); ok("an empty window says so");
   assert.deepStrictEqual(live(), ["work"]); ok("only the window of the selected session is active");
-  [...$("sessions").querySelectorAll("li.group")][1].click();
+  [...$("sessions").querySelectorAll("li.group")].find((g) => g.querySelector(".gname").textContent === "win2").click();
   await until(() => $("title").textContent === "新对话" && live().join() === "win2", "new chat drafted in the second window");
   assert($("cwdBtn").textContent.includes(win2)); ok("choosing a window starts the new chat in that window and moves the green dot");
   $("newBtn").click();

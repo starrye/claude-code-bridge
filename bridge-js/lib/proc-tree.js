@@ -59,6 +59,9 @@ async function descendants(rootPid) {
 
 // True if the process exists and is not a zombie
 async function alive(pid) {
+  if (process.platform === 'win32') {
+    try { process.kill(pid, 0); return true; } catch (error) { return error.code === 'EPERM'; }
+  }
   if (!HAS_PROC) {
     const state = (await ps(['-o', 'stat=', '-p', String(pid)])).trim();
     return Boolean(state) && !state.startsWith('Z');
@@ -97,6 +100,10 @@ async function waitGone(pids, timeout) {
 
 // SIGTERM the root, then its descendants, then SIGKILL stragglers. Resolves to the pids that had to be force-killed.
 async function terminateTree(rootPid, grace = 2.0) {
+  if (process.platform === 'win32') {                   // no signals or /proc: taskkill walks the tree itself
+    await new Promise((resolve) => execFile('taskkill', ['/PID', String(rootPid), '/T', '/F'], { timeout: 10000, windowsHide: true }, () => resolve()));
+    return [];
+  }
   const tree = await descendants(rootPid);              // must be collected before signalling the root
   signal([rootPid], 'SIGTERM');
   await waitGone([rootPid], grace);

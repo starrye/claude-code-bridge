@@ -174,7 +174,7 @@ https://…/#s=<会话 ID>
 
 ### 一、用户：安装插件
 
-要求：Linux 或 macOS（Windows 请用 WSL / Dev Containers）、已安装并登录 `claude`。不需要安装 Python 或 Node。
+要求：Linux、macOS 或 Windows（Windows 需已装 Git for Windows，Claude Code 自己也要它）、已安装并登录 `claude`。不需要安装 Python 或 Node。
 
 1. 拿到 `agent-bridge-x.y.z.vsix`（见下文“打包”），在 VS Code 里执行 `Extensions: Install from VSIX...`，或 `code --install-extension agent-bridge-x.y.z.vsix`。
 2. 在设置里填 `agentBridge.relayAddress`（管理员提供，形如 `https://relay.example.com:9010`），或首次启动时按提示输入；打包时指定了默认地址则无需填写。写成 `主机:端口` 是明文连接，仅用于内网或测试，绑定时会有警告。
@@ -460,7 +460,7 @@ git add updates/ vscode-extension/package.json CHANGELOG.md && git commit -m "re
 ## 已知限制与安全说明
 
 - **只有按“生产部署”的方式部署才是全程加密。** 用 `主机:端口` 形式的地址或单端口的 `--listen` 启动时，隧道和绑定是明文的，客户端会给出警告。
-- Windows 不支持（`relay.py` 使用了 `fcntl`），请用 WSL。
+- 中继（`relay.py`）使用了 `fcntl`，只能跑在 Linux / macOS 服务器上；用户电脑上的 Bridge 与中继客户端支持 Windows。Windows 上文件权限（0600）不生效，令牌文件靠用户目录自身的访问控制保护。
 - 状态栏“运行中”只表示进程已启动，不保证与中继连通，连接问题看插件日志。
 - 同一时间只有一个 VS Code 窗口托管 Bridge（同一个环境里；不同容器、不同主机各自托管各自的 Bridge）。
 - 电脑名只在绑定时上报一次，之后换打开的文件夹、改 `computerName` 都不会改变手机上已有的名字，要“重新绑定手机”才更新；改过名再绑定时，旧名字的条目会留下，需要在手机上手动移除。

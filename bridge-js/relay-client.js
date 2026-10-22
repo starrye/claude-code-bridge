@@ -334,8 +334,8 @@ function describeSession(targetAddr, secret, session) {
           const data = response.statusCode === 200 ? JSON.parse(Buffer.concat(chunks).toString('utf8')) : {};
           const item = (data.sessions || []).find((x) => x && x.session_id === session);
           if (item) {
-            const folder = String(item.root || item.cwd || '').replace(/\/+$/, '');
-            resolve([oneLine(folder.split('/').pop(), 60), oneLine(item.title || item.name, 80)]);
+            const folder = String(item.root || item.cwd || '').replace(/[\\/]+$/, '');
+            resolve([oneLine(folder.split(/[\\/]/).pop(), 60), oneLine(item.title || item.name, 80)]);
             return;
           }
         } catch { /* fall through */ }
@@ -401,7 +401,7 @@ async function watchBridge(webBase, targetAddr, connectorId, secret, stop) {
   }
 }
 
-const stateDir = () => process.env.BRIDGE_STATE_DIR || `/tmp/claude-bridge-${process.getuid ? process.getuid() : 0}`;
+const stateDir = () => process.env.BRIDGE_STATE_DIR || path.join(process.platform === 'win32' ? os.tmpdir() : '/tmp', `claude-bridge-${process.getuid ? process.getuid() : 0}`);
 
 function readEnvFile(file) {
   const values = {};

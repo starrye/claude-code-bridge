@@ -8,6 +8,7 @@ const { Supervisor, isValidRelay } = require('./lib/supervisor');
 const { updateBaseFromRelay, checkForUpdate, downloadUpdate } = require('./lib/updater');
 const { renderPairingHtml } = require('./lib/pairing-html');
 const { computerLabel } = require('./lib/naming');
+const { findBundledClaude } = require('./lib/claude-locate');
 
 const STATUS = {
   stopped: '$(circle-slash) Bridge 已停止',
@@ -33,7 +34,8 @@ function settings() {
   return {
     relay: String(config.get('relayAddress') || '').trim(),
     port: config.get('bridgePort') || 8787,
-    claude: config.get('claudePath') || '',
+    // empty setting: use the newest claude shipped by the Claude Code extension, else the one on PATH
+    claude: config.get('claudePath') || findBundledClaude(path.dirname(context.extensionPath)),
     computerName: config.get('computerName') || '',
     autoStart: config.get('autoStart') !== false,
   };

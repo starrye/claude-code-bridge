@@ -4,6 +4,16 @@
 
 ## [未发布]
 
+### 新增
+
+- 支持本地 Windows：自动找到 npm 安装的 `claude.exe`，审批 hook 在 Git Bash 下可用，取消任务用 `taskkill` 清理整棵进程树，路径处理兼容反斜杠。启动 claude 时保留 `CLAUDE_CODE_GIT_BASH_PATH`，否则 Claude 找不到 bash、审批 hook 不会执行。
+- `claudePath` 留空时，优先使用 Claude Code 扩展自带的最新版 `claude`（和编辑器面板同一个版本），找不到再从 PATH 查找。原来直接用 PATH 里的，可能比编辑器里的旧，手机上别名 `sonnet` 会解析成旧模型，模型列表也和电脑端不一致。
+
+### 修复
+
+- 手机上聊天记录里出现一大段“This session is being continued…”：这是 Claude Code 压缩上下文时写入的摘要，不是用户输入，现在不再显示。
+- 手机上输入栏的模型标签写死了版本号（如 Sonnet 5.5），和实际使用的模型不一致。现在显示该会话最近一次实际回答的模型版本，没有回答记录时只显示别名。
+
 ### 变更
 
 - 开源准备：去掉内置的默认中继地址和旧地址迁移，插件不再自带任何服务器地址，需要用户填写或打包时用 `RELAY=` 指定。

@@ -315,7 +315,7 @@ function renderRow(row) {
   };
 
   {
-    if (py.truthy(get(row, 'isMeta'))) return items;
+    if (py.truthy(get(row, 'isMeta')) || py.truthy(get(row, 'isCompactSummary'))) return items;
     const type = get(row, 'type');
     if (type === 'system') {
       if (get(row, 'subtype') === 'local_command' && isStr(get(row, 'content'))) {

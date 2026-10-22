@@ -13,7 +13,7 @@ const procTree = require('./proc-tree');
 const commands = require('./commands');
 const { GATED_TOOLS, redact } = require('./approvals');
 
-const CLAUDE_BIN = () => process.env.CLAUDE_BIN || 'claude';
+const { claudeBin: CLAUDE_BIN } = require('./claude-bin');
 const ENTRYPOINT = 'feishu-bridge';
 const WRITE_TOOLS = 'Write Edit MultiEdit NotebookEdit Bash';
 const TEXT_FLUSH_SECONDS = 0.5;
@@ -69,6 +69,10 @@ const shellQuote = (value) => `'${String(value).replace(/'/g, "'\\''")}'`;
 
 // The hook runs on the same Node that runs the bridge (inside VS Code that is its Electron binary in Node mode)
 function hookCommand(hookScript = HOOK_SCRIPT) {
+  if (process.platform === 'win32') {                   // Claude Code runs hooks through Git Bash there: forward slashes
+    const slash = (p) => String(p).replace(/\\/g, '/');
+    return `ELECTRON_RUN_AS_NODE=1 ${shellQuote(slash(process.execPath))} ${shellQuote(slash(hookScript))}`;
+  }
   return `ELECTRON_RUN_AS_NODE=1 ${shellQuote(process.execPath)} ${shellQuote(hookScript)}`;
 }
 
@@ -94,13 +98,14 @@ function buildCommand(mode, prompt, sessionId, settingsFile, promptOnStdin = fal
   return cmd;
 }
 
+const KEEP_ENV = 'CLAUDE_CODE_GIT_BASH_PATH';       // Windows: where Claude Code finds bash, which it needs to run hooks and shell tools
 const CHILD_HIDDEN = ['CLAUDE_CODE_', 'CLAUDE_AGENT_SDK', 'RELAY_', 'FEISHU_'];
 
 // Environment for a `claude -p` child. Drops what Claude Code injected into the parent (CLAUDE_CODE_*, including the
 // messaging token of whichever session started the bridge); ANTHROPIC_* is kept. ELECTRON_RUN_AS_NODE is dropped so
 // it does not leak into tools claude runs. The entrypoint marks phone-originated turns in the session file.
 function childEnv(taskId, bridgeUrl, token) {
-  const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !CHILD_HIDDEN.some((p) => k.startsWith(p))
+  const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => k === KEEP_ENV || !CHILD_HIDDEN.some((p) => k.startsWith(p))
     && !['CLAUDECODE', 'CLAUDE_PID', 'ELECTRON_RUN_AS_NODE'].includes(k)));
   return { ...env, CLAUDE_CODE_ENTRYPOINT: ENTRYPOINT, BRIDGE_TASK_ID: taskId, BRIDGE_URL: bridgeUrl, BRIDGE_TOKEN: token };
 }

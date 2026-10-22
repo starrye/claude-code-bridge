@@ -503,13 +503,17 @@
 
   // ---------- bottom bar: context ring, timer, tokens, model chip ----------
   const CONTEXT_LIMIT = 1000000;
-  const MODEL_SHORT = { opus: "Opus 5.5", sonnet: "Sonnet 5.5", haiku: "Haiku 5.5", fable: "Fable 5.1" };
+  const MODEL_SHORT = { opus: "Opus", sonnet: "Sonnet", haiku: "Haiku", fable: "Fable" };
   const fmtTokens = (n) => n >= 1e6 ? (n / 1e6).toFixed(n >= 1e7 ? 0 : 1) + "M" : n >= 1e3 ? (n / 1e3).toFixed(n >= 1e4 ? 0 : 1) + "k" : String(n);
-  function modelLabel(name) {
+  function modelLabel(name, served) {
     if (!name) return "默认";
-    if (MODEL_SHORT[name]) return MODEL_SHORT[name];
-    const m = /^claude-([a-z]+)-(\d+)(?:-(\d+))?/.exec(name);
-    return m ? m[1][0].toUpperCase() + m[1].slice(1) + " " + m[2] + (m[3] && m[3].length < 3 ? "." + m[3] : "") : name;
+    const full = (n) => { const m = /^claude-([a-z]+)-(\d+)(?:-(\d+))?/.exec(n || ""); return m ? { family: m[1], text: m[1][0].toUpperCase() + m[1].slice(1) + " " + m[2] + (m[3] && m[3].length < 3 ? "." + m[3] : "") } : null; };
+    if (MODEL_SHORT[name]) {
+      const real = full(served);
+      return real && real.family === name ? real.text : MODEL_SHORT[name];
+    }
+    const own = full(name);
+    return own ? own.text : name;
   }
   function ringSvg(fraction) {
     const svg = document.createElementNS(SVG_NS, "svg");
@@ -545,7 +549,7 @@
     const effort = currentPref("effort");
     const chip = $("modelChip");
     chip.textContent = "";
-    chip.append(el("span", "", modelLabel(model)));
+    chip.append(el("span", "", modelLabel(model, s && s.served_model)));
     if (effort) chip.append(el("span", "chipSub", (EFFORT_INFO[effort] || { label: effort }).label));
     chip.disabled = Boolean(state.branch);
     $("slashBtn").disabled = Boolean(state.branch);
@@ -1187,10 +1191,10 @@
   const COMMAND_NAME = /^[A-Za-z0-9][A-Za-z0-9_:.\-]{0,63}$/;
   const MODEL_INFO = {
     default: { label: "默认 (推荐)", desc: "使用默认模型" },
-    opus: { label: "Opus", desc: "Opus 5.5 · 日常和复杂任务" },
-    fable: { label: "Fable", desc: "Fable 5.1 · 最难最长的任务" },
-    sonnet: { label: "Sonnet", desc: "Sonnet 5.5 · 常规任务,高性价比" },
-    haiku: { label: "Haiku", desc: "Haiku 5.5 · 最快的简单回答" },
+    opus: { label: "Opus", desc: "日常和复杂任务" },
+    fable: { label: "Fable", desc: "最难最长的任务" },
+    sonnet: { label: "Sonnet", desc: "常规任务,高性价比" },
+    haiku: { label: "Haiku", desc: "最快的简单回答" },
   };
   const EFFORT_INFO = {
     default: { label: "默认", desc: "使用模型的默认强度" },
@@ -1295,7 +1299,7 @@
         if (shown.length) body.appendChild(el("hr", "fpSep"));
         body.appendChild(el("div", "fpHead", "模型"));
         const s = currentSession();
-        body.appendChild(row("切换模型…", modelLabel(currentPref("model") || (s && s.served_model)), () => chooseModel("")));
+        body.appendChild(row("切换模型…", modelLabel(currentPref("model") || (s && s.served_model), s && s.served_model), () => chooseModel("")));
         if (cmds) body.appendChild(effortSlider(effortLevels(cmds)));
       }
       if (!q || "通知 机器人 飞书 notify".includes(q)) {

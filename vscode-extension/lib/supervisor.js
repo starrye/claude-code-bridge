@@ -180,7 +180,6 @@ class Supervisor extends EventEmitter {
 
   async launch(run, enroll) {
     const o = this.opts;
-    if (process.platform === 'win32') throw new Error('不支持本地 Windows，请在 WSL 或 Dev Containers 中使用');
     if (!isValidRelay(o.relay)) throw new Error('中继地址格式应为 https://域名[:端口]（加密，推荐）或 主机:端口（明文）');
     const engine = ENGINES[this.engine()];
     if (!fs.existsSync(path.join(o.bridgeDir, engine.marker))) throw new Error(`插件内缺少运行文件（${engine.marker}），请重新安装`);
@@ -406,7 +405,14 @@ class Supervisor extends EventEmitter {
 
   checkClaude() {
     const bin = this.opts.claude || 'claude';
-    execFile(bin, ['--version'], { timeout: 10000 }, (error) => {
+    let target = bin;
+    try {
+      process.env.CLAUDE_BIN = bin;
+      target = require(path.join(this.opts.bridgeDir, 'bridge-js', 'lib', 'claude-bin.js')).claudeBin();
+    } catch {
+      // fall back to the bare name
+    }
+    execFile(target, ['--version'], { timeout: 10000 }, (error) => {
       if (error && error.code === 'ENOENT') {
         this.emit('warn', `找不到 ${bin} 命令，手机发起的任务会失败。请安装 Claude Code 或设置 agentBridge.claudePath`);
       }

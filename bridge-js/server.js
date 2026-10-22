@@ -19,8 +19,9 @@ const STATIC_DIR = process.env.BRIDGE_STATIC_DIR || path.join(__dirname, '..', '
 const HOST = process.env.BRIDGE_HOST || '127.0.0.1';
 const PORT = py.int(process.env.BRIDGE_PORT || '8787');
 const UID = process.getuid ? process.getuid() : 0;
-const EVENTS_FILE = process.env.CLAUDE_EVENTS_FILE || `/tmp/claude-feishu-probe-${UID}/events.jsonl`;
-const STATE_DIR = process.env.BRIDGE_STATE_DIR || `/tmp/claude-bridge-${UID}`;
+const TMP = process.platform === 'win32' ? require('node:os').tmpdir() : '/tmp';
+const EVENTS_FILE = process.env.CLAUDE_EVENTS_FILE || path.join(TMP, `claude-feishu-probe-${UID}`, 'events.jsonl');
+const STATE_DIR = process.env.BRIDGE_STATE_DIR || path.join(TMP, `claude-bridge-${UID}`);
 const MIN_TOKEN_LENGTH = 24;
 const FAIL_LIMIT = py.int(process.env.BRIDGE_FAIL_LIMIT || '20');
 const FAIL_WINDOW = Number(process.env.BRIDGE_FAIL_WINDOW || '60');

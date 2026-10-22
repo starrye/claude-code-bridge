@@ -26,7 +26,7 @@
 
 ## 要求
 
-- Linux 或 macOS（Windows 请用 WSL / Dev Containers）。
+- Linux、macOS 或 Windows（Windows 需已装 Git for Windows）。
 - 不需要安装 Python 或 Node：Bridge 和中继客户端运行在 VS Code 自带的 Node 上。
 - 已安装并登录 `claude` 命令。
 

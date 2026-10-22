@@ -57,7 +57,7 @@ const registered = new Map();             // real path -> expiry (ms); other VS 
 function registerWorkspace(raw) {
   if (typeof raw !== 'string' || !py.strip(raw) || raw.includes('\0') || !path.isAbsolute(raw)) return false;
   const real = py.realpath(raw);
-  if (real === '/' || !isDirPath(real)) return false;
+  if (real === path.parse(real).root || !isDirPath(real)) return false;
   const now = Date.now();
   for (const [key, expiry] of registered) if (expiry <= now) registered.delete(key);
   if (!registered.has(real) && registered.size >= MAX_WORKSPACES) return false;
@@ -93,7 +93,7 @@ function workspace() {
 function rootOf(cwd) {
   if (!py.truthy(cwd)) return null;
   const real = py.realpath(cwd);
-  const found = workspaces().filter((r) => real === r || real.startsWith(r.replace(/\/+$/, '') + '/'));
+  const found = workspaces().filter((r) => real === r || real.startsWith(r.replace(/[\\/]+$/, '') + path.sep));
   return found.length ? found.reduce((a, b) => (b.length > a.length ? b : a)) : null;
 }
 

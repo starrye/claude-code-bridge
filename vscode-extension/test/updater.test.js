@@ -142,7 +142,7 @@ test('over https: check, download and verify a real release', { skip: !hasOpenss
   const dest = tmpdir('upd-dl-');
   const file = await updater.downloadUpdate(release, dest, { ca: tls.cert });
   assert.deepEqual(fs.readFileSync(file), data);
-  assert.equal(fs.statSync(file).mode & 0o777, 0o600);
+  if (process.platform !== 'win32') assert.equal(fs.statSync(file).mode & 0o777, 0o600);   // Windows has no POSIX modes
   assert.deepEqual(fs.readdirSync(dest), ['agent-bridge-0.2.0.vsix'], 'no partial file left behind');
   const none = await updater.checkForUpdate({ base, current: '0.2.0', publicKey: KEY.publicPem, name: NAME, ca: tls.cert });
   assert.equal(none.available, false);
