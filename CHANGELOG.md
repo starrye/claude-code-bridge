@@ -6,11 +6,18 @@
 
 ### 新增
 
+- 手机上可以用 OpenAI Codex：会话、任务、审批、插话与打断、分叉续聊，和 Claude 的会话混排，新对话可选用哪个 agent。电脑上找得到 `codex` 才启用，设 `BRIDGE_CODEX=0` 可关闭。
+- 编辑器和手机共用同一个 Codex 会话：Bridge 接管 Codex 扩展自带的 `codex`（原版改名为 `codex.orig`，原位放转发脚本），共用一个只监听本机的 `codex app-server`。可用设置 `agentBridge.codexTakeover` 关闭，卸载插件时恢复原样；Bridge 不在时转发脚本直接运行原版。Windows 上用系统自带的 `csc.exe` 编译启动器。
+- 手机上 Codex 的命令与技能：`/review`、`/init`、`/feedback`、`/compact`、`/status`、`/goal`、`/sketch`，点“命令与设置”按钮直接列出。
+- `/sketch` 草图：深色画布，选择、画笔、文字、形状、橡皮，撤销和重做，13 种颜色。
+- Codex 生成的图片和发给它的本地图片可以在手机上显示；发送的图片保留 30 天，重新打开会话仍能看到。
+- 扩展详情页多了“变更日志”标签。
 - 支持本地 Windows：自动找到 npm 安装的 `claude.exe`，审批 hook 在 Git Bash 下可用，取消任务用 `taskkill` 清理整棵进程树，路径处理兼容反斜杠。启动 claude 时保留 `CLAUDE_CODE_GIT_BASH_PATH`，否则 Claude 找不到 bash、审批 hook 不会执行。
 - `claudePath` 留空时，优先使用 Claude Code 扩展自带的最新版 `claude`（和编辑器面板同一个版本），找不到再从 PATH 查找。原来直接用 PATH 里的，可能比编辑器里的旧，手机上别名 `sonnet` 会解析成旧模型，模型列表也和电脑端不一致。
 
 ### 修复
 
+- 手机上点输入框弹出键盘时，聊天记录会跟着顶上去，不再被输入框挡住。
 - 手机上聊天记录里出现一大段“This session is being continued…”：这是 Claude Code 压缩上下文时写入的摘要，不是用户输入，现在不再显示。
 - 手机上输入栏的模型标签写死了版本号（如 Sonnet 5.5），和实际使用的模型不一致。现在显示该会话最近一次实际回答的模型版本，没有回答记录时只显示别名。
 

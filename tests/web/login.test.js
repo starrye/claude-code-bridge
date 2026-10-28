@@ -70,6 +70,7 @@ function page({ url, userAgent, token, feishu, exchange, storage, sessions, pair
   p = page({ url: "http://x.test/", userAgent: "Mozilla/5.0 Lark/7.0 Feishu", feishu: true, storage: { feishu_tried: "1" } });
   await sleep(100);
   assert.deepStrictEqual(p.nav, []); ok("it does not loop: a second visit shows the login page instead");
+  assert(p.$("tokenInput").hidden && p.$("tokenBtn").hidden && !p.$("feishuBtn").hidden); ok("inside Feishu only the Feishu button is offered, no token input");
 
   p = page({ url: "http://x.test/", userAgent: "Mozilla/5.0 Safari", feishu: true });
   await sleep(100);
@@ -87,13 +88,8 @@ function page({ url, userAgent, token, feishu, exchange, storage, sessions, pair
 
   p = page({ url: "http://x.test/", token: "dv_saved", sessions: fixed(403, { error: "not_paired" }), pair: fixed(400, { error: "bad_code" }) });
   await sleep(150);
-  assert(!p.$("pairPanel").hidden); ok("an account with no computer bound is asked for a pairing code");
-  p.$("pairInput").value = "abcd efgh";
-  p.$("pairForm").dispatchEvent(new p.w.Event("submit", { cancelable: true }));
-  await sleep(100);
-  const sent = JSON.parse(p.calls.find((c) => c.u.endsWith("/auth/pair")).opts.body);
-  assert.strictEqual(sent.code, "abcd efgh"); assert(/不正确/.test(p.$("pairError").textContent)); ok("the code is sent in the body and a wrong code is explained");
-  assert(!p.calls.some((c) => c.u.includes("abcd"))); ok("the code never appears in a URL");
+  assert(!p.$("pairPanel").hidden); ok("an account with no computer bound is told to scan the QR code, with no code input");
+  assert(!p.$("pairInput") && !p.calls.some((c) => c.u.endsWith("/auth/pair"))); ok("there is no pairing-code input");
 
   p = page({ url: "http://x.test/", token: "dv_saved", sessions: fixed(503, { error: "bridge_offline" }) });
   await sleep(150);

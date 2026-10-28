@@ -232,7 +232,9 @@ async function main() {
   await until(() => sendKind() === "stop", "stop visible", 20000);
   $("sendBtn").click();
   await until(idle, "idle after cancel", 20000);
-  assert([...d.querySelectorAll(".banner")].some((b) => /已取消/.test(b.textContent))); ok("cancel stops the task and says so");
+  // the banner follows the history reload, which finishes after the button flips back to send
+  await until(() => [...d.querySelectorAll(".banner")].some((b) => /已取消/.test(b.textContent)), "cancel banner", 10000);
+  ok("cancel stops the task and says so");
 
   // --- editor owns the session: phone observes live, cannot write
   const jsonl = require("child_process").execSync(`ls ${projects}/*/${seedSid}.jsonl`).toString().trim();

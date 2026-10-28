@@ -8,7 +8,7 @@ const { Supervisor, isValidRelay } = require('./lib/supervisor');
 const { updateBaseFromRelay, checkForUpdate, downloadUpdate } = require('./lib/updater');
 const { renderPairingHtml } = require('./lib/pairing-html');
 const { computerLabel } = require('./lib/naming');
-const { findBundledClaude } = require('./lib/claude-locate');
+const { findBundledClaude, findBundledCodex } = require('./lib/claude-locate');
 
 const STATUS = {
   stopped: '$(circle-slash) Bridge 已停止',
@@ -36,6 +36,8 @@ function settings() {
     port: config.get('bridgePort') || 8787,
     // empty setting: use the newest claude shipped by the Claude Code extension, else the one on PATH
     claude: config.get('claudePath') || findBundledClaude(path.dirname(context.extensionPath)),
+    codex: findBundledCodex(path.dirname(context.extensionPath)),
+    codexTakeover: config.get('codexTakeover') !== false,
     computerName: config.get('computerName') || '',
     autoStart: config.get('autoStart') !== false,
   };
@@ -212,6 +214,18 @@ async function menu() {
   if (picked) await picked.run();
 }
 
+// The Bridge reports whether it took over the Codex extension's codex. The editor panel only joins after a reload.
+function onCodexTakeover(line) {
+  const match = /^Codex takeover: (\S+)/.exec(line);
+  if (!match || !['installed', 'restored'].includes(match[1])) return;
+  const text = match[1] === 'installed'
+    ? 'Agent Bridge 已接管编辑器里的 Codex：重新加载窗口后，手机和电脑可以同时使用同一个 Codex 会话。不需要时可在设置里关闭 agentBridge.codexTakeover。'
+    : 'Agent Bridge 已把 Codex 扩展恢复原样，重新加载窗口后生效。';
+  vscode.window.showInformationMessage(text, '重新加载').then((choice) => {
+    if (choice === '重新加载') vscode.commands.executeCommand('workbench.action.reloadWindow');
+  });
+}
+
 function activate(extensionContext) {
   context = extensionContext;
   output = vscode.window.createOutputChannel('Agent Bridge');
@@ -219,7 +233,10 @@ function activate(extensionContext) {
   statusItem.command = 'agentBridge.menu';
   supervisor = new Supervisor();
 
-  supervisor.on('log', (source, line) => output.appendLine(`[${source}] ${line}`));
+  supervisor.on('log', (source, line) => {
+    output.appendLine(`[${source}] ${line}`);
+    if (source === 'bridge') onCodexTakeover(line);
+  });
   supervisor.on('state', renderState);
   supervisor.on('pairing', (info) => {
     lastPairing = info;

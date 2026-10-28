@@ -1,7 +1,7 @@
 PYTHON ?= python3
 RELAY ?=
 
-.PHONY: test test-bridge test-extension test-web relay-package vsix release release-key clean
+.PHONY: test test-bridge test-extension test-web test-phone relay-package vsix release release-key clean
 
 test: test-bridge test-extension
 
@@ -14,9 +14,13 @@ test-bridge:
 test-extension:
 	cd vscode-extension && node --test test/
 
-# 手机端页面测试，需要先 npm install jsdom
+# 手机端页面测试，需要先 npm install
 test-web:
 	node --test tests/web/
+
+# 手机浏览器模拟（iPhone Safari 内核 + Pixel Chrome），首次先 npm install && npx playwright install --with-deps chromium webkit
+test-phone:
+	node tests/e2e/phone.js
 
 # 中继部署包：relay.py + relay_lib/ + web/
 relay-package:

@@ -1,6 +1,6 @@
 # Agent Bridge
 
-一键启动 **Bridge** 和 **中继客户端**，让手机通过飞书远程操作这台机器上的 Claude Code。
+一键启动 **Bridge** 和 **中继客户端**，让手机通过飞书远程操作这台机器上的 **Claude Code** 和 **Codex**。每个版本的变化见详情页的“变更日志”。
 
 ## 使用
 
@@ -16,7 +16,7 @@
 - 本地 VS Code：安装后在本机运行。
 - 连接容器、SSH 或 WSL：在已连接的窗口里安装，插件会装进远端并在那里运行。Bridge 需要访问 `claude` 命令和会话文件，所以必须跑在 Claude Code 所在的机器上。
 
-安装：`Extensions: Install from VSIX...`，或命令行 `code --install-extension agent-bridge-0.1.0.vsix`。
+安装：`Extensions: Install from VSIX...`，或命令行 `code --install-extension agent-bridge-<版本>.vsix`。
 
 ## 多个窗口、多个容器
 
@@ -28,7 +28,17 @@
 
 - Linux、macOS 或 Windows（Windows 需已装 Git for Windows）。
 - 不需要安装 Python 或 Node：Bridge 和中继客户端运行在 VS Code 自带的 Node 上。
-- 已安装并登录 `claude` 命令。
+- 用 Claude Code：已安装并登录 `claude` 命令。
+- 用 Codex：装了 OpenAI Codex 扩展（或 `codex` 命令）并登录。两个都装，手机上就两个都能用。
+
+## Codex
+
+- 手机上 Claude 和 Codex 的会话混排，新对话可以选用哪个。Codex 任务运行中可以插话和打断，命令和改文件照常走手机审批。
+- 点输入框下面的“命令与设置”按钮，直接列出 Codex 的命令和技能，点一下执行：`/review` 代码审查（未提交的更改、与分支或提交比较、自定义要求）、`/init` 生成 AGENTS.md、`/feedback` 发反馈、`/compact` 压缩上下文、`/status` 会话与用量限制、`/goal` 目标、`/sketch` 画草图作为图片发送。计划模式、IDE 上下文、MCP 状态手机上暂不支持。
+- 为了让手机和电脑上的 Codex 面板同时用同一个会话，插件会接管 Codex 扩展自带的 `codex`：原版改名为 `codex.orig`，原位放一个转发脚本，和 Bridge 共用一个只在本机监听的 codex 服务。Agent Bridge 没在运行时，转发脚本直接运行原版，Codex 照常能用。
+- 第一次接管后会提示重新加载窗口，重新加载后才生效。停止 Agent Bridge 后正开着的 Codex 面板会报连接断开，重新加载窗口即可。
+- 不想接管：设置 `agentBridge.codexTakeover` 关掉，重新加载窗口，Codex 扩展恢复原样；这时电脑上正开着的 Codex 会话，手机上只能“分叉续聊”。卸载 Agent Bridge 时也会恢复原样。
+- 接管依赖 Codex 扩展当前的目录结构，认不出时自动跳过（看“查看日志”）。Windows 上用系统自带的 csc.exe 编译一个启动器来接管。
 
 ## 命令
 

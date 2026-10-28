@@ -1,7 +1,7 @@
 {
   "name": "agent-bridge",
   "displayName": "Agent Bridge",
-  "description": "一键启动 Bridge 与中继客户端，让手机通过飞书远程操作本机的 Claude Code",
+  "description": "一键启动 Bridge 与中继客户端，让手机通过飞书远程操作本机的 Claude Code 和 Codex",
   "version": "0.6.4",
   "publisher": "starrye",
   "license": "MIT",
@@ -24,6 +24,7 @@
   "main": "./extension.js",
   "scripts": {
     "test": "node --test test/",
+    "vscode:uninstall": "node ./uninstall.js",
     "build": "python3 scripts/build_vsix.py"
   },
   "contributes": {
@@ -69,6 +70,12 @@
           "type": "string",
           "default": "",
           "description": "claude 命令的路径。留空时优先使用 Claude Code 扩展自带的最新版本（和编辑器面板同一个版本），找不到再从 PATH 查找。"
+        },
+        "agentBridge.codexTakeover": {
+          "scope": "machine",
+          "type": "boolean",
+          "default": true,
+          "description": "装了 OpenAI Codex 扩展时，让编辑器里的 Codex 和手机共用同一个 codex 服务，同一个会话两边都能接着用。关闭后恢复 Codex 扩展原样（重新加载窗口生效），编辑器正开着的会话在手机上只能分叉续聊。"
         }
       }
     }

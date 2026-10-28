@@ -8,10 +8,9 @@ const http = require('node:http');
 const path = require('node:path');
 const py = require('./lib/py');
 const sessions = require('./lib/sessions');
-const transcript = require('./lib/transcript');
-const commands = require('./lib/commands');
+const agents = require('./lib/agents');
 const { Approvals, summarizeInput } = require('./lib/approvals');
-const { Runner, TaskError } = require('./lib/runner');
+const { TaskError } = require('./lib/runner');
 
 const MAX_BODY_BYTES = 1000000;
 const MAX_TASK_BODY_BYTES = 9000000;
@@ -29,7 +28,7 @@ const SSE_MAX_BUFFER = 4 * 1024 * 1024;                 // a slow page drops eve
 
 const subscribers = new Set();
 let TOKEN = '';
-let runner = null;
+const runners = new Map();                              // agent id -> its Runner
 let approvals = null;
 let store = null;
 const failures = [];
@@ -104,52 +103,24 @@ const SECURITY_HEADERS = {
   'Referrer-Policy': 'no-referrer',
   'Cache-Control': 'no-store',
 };
-const TASK_PATH = /^\/tasks\/([0-9a-f]{32})(\/cancel)?$/;
+const TASK_PATH = /^\/tasks\/([0-9a-f]{32})(\/cancel|\/steer)?$/;
 const APPROVAL_PATH = /^\/approvals\/([0-9a-f]{32})$/;
-const SESSION_PATH = /^\/sessions\/([0-9a-f-]{36})\/(mode|forks|messages|prefs)$/;
+const SESSION_PATH = /^\/sessions\/([0-9a-f-]{36})\/(mode|forks|messages|prefs|status|goal|compact|feedback)$/;
 
-function sessionModels(sid) {
-  const prefs = store.getPrefs(sid);
-  return { model_pref: prefs.model ?? null, effort_pref: prefs.effort ?? null, served_model: sessions.servedModel(sid), usage: sessions.sessionUsage(sid) };
-}
-
-// Sessions open in Claude Code processes now (VS Code panels and terminals), then sessions this bridge ran
+// Every agent's sessions, newest first
 function listSessions() {
-  const out = [];
-  for (const entry of sessions.liveRegistry()) {
-    if (!sessions.inWorkspace(entry.cwd)) continue;
-    const sid = entry.sessionId;
-    out.push({
-      session_id: sid, name: entry.name, title: sessions.sessionTitle(sid), source: entry.entrypoint, cwd: entry.cwd, root: sessions.rootOf(entry.cwd),
-      status: py.truthy(entry.status) ? entry.status : 'unknown', updated_at: entry.updatedAt, version: entry.version,
-      editor_mode: sessions.lastPermissionMode(sid), phone_mode: store.getMode(sid), busy_task: store.busyTask(sid),
-      ...sessionModels(sid), editor_open: true,
-    });
-  }
-  const live = new Set(out.map((s) => s.session_id));
-  for (const [sid, info] of Object.entries(store.known())) {
-    if (live.has(sid) || sessions.findSessionFile(sid) === null || !sessions.inWorkspace(info.cwd ?? null)) continue;
-    out.push({
-      session_id: sid, name: null, title: sessions.sessionTitle(sid), source: 'feishu-bridge', cwd: info.cwd ?? null, root: sessions.rootOf(info.cwd ?? null),
-      status: 'closed', updated_at: info.updated_at ?? null, version: null, editor_mode: null, phone_mode: store.getMode(sid),
-      busy_task: store.busyTask(sid), ...sessionModels(sid), editor_open: false,
-    });
-  }
+  const out = agents.AGENTS.flatMap((agent) => agent.listSessions(store));
   // stable sort, newest first, same as Python's sort(reverse=True)
   const key = (s) => (py.truthy(s.updated_at) ? s.updated_at : 0);
   return out.map((s, i) => [s, i]).sort((a, b) => (key(b[0]) > key(a[0]) ? 1 : key(b[0]) < key(a[0]) ? -1 : a[1] - b[1])).map(([s]) => s);
 }
 
-// Why the list may be empty: the facts the page turns into a hint
-function sessionDiagnostics(listed) {
-  const host = sessions.hostInfo();
-  const hidden = sessions.liveRegistry().filter((e) => !sessions.inWorkspace(e.cwd)).length;
-  let notice = null;
-  if (!host.projects_exists && !host.registry_exists) notice = 'no_claude_data';
-  else if (!listed.length && hidden) notice = 'hidden_by_workspace';
-  else if (!listed.length) notice = 'no_sessions';
-  return { host, hidden, notice };
-}
+// A task of any agent
+const findTask = (taskId) => {
+  for (const runner of runners.values()) if (runner.tasks.has(taskId)) return runner.tasks.get(taskId);
+  return undefined;
+};
+const allTasks = () => [...runners.values()].flatMap((runner) => [...runner.tasks.values()]);
 
 // uuid.uuid5(uuid.NAMESPACE_URL, name)
 function uuid5Url(name) {
@@ -389,9 +360,9 @@ function streamEvents(request, response) {
   response.on('error', close);
 }
 
-function sessionMessages(response, sessionId, params) {
-  const file = sessions.findSessionFile(sessionId);
-  if (file === null) {
+async function sessionMessages(response, sessionId, params) {
+  const agent = agents.forSession(sessionId);
+  if (agent === null) {
     sendJson(response, 404, { error: 'session_not_found' });
     return;
   }
@@ -406,7 +377,13 @@ function sessionMessages(response, sessionId, params) {
   }
   const branch = (params.get('branch') || [null])[0];
   const afterId = (params.get('after_id') || [null])[0];
-  const page = transcript.messages(file, after, limit, branch, afterId);
+  let page;
+  try {
+    page = await agent.messages(sessionId, after, limit, branch, afterId);
+  } catch (error) {
+    sendJson(response, 502, { error: 'agent_unavailable', agent: agent.id, reason: error.message });
+    return;
+  }
   if (page === null) {
     sendJson(response, 404, { error: 'branch_not_found' });
     return;
@@ -430,23 +407,42 @@ async function handleGet(request, response, { pathname, params }) {
   const session = SESSION_PATH.exec(pathname);
   if (pathname === '/events') return streamEvents(request, response);
   if (pathname === '/history') return sendJson(response, 200, { events: readRecentEvents() });
-  if (pathname === '/tasks') return sendJson(response, 200, { tasks: [...runner.tasks.values()].map((t) => t.public()) });
+  if (pathname === '/tasks') return sendJson(response, 200, { tasks: allTasks().map((t) => t.public()) });
   if (pathname === '/approvals') return sendJson(response, 200, { approvals: approvals.pending() });
   if (task && !task[2]) {
-    const found = runner.tasks.get(task[1]);
+    const found = findTask(task[1]);
     return found ? sendJson(response, 200, { ...found.public(), events: found.events.slice(-100) }) : sendJson(response, 404, { error: 'task_not_found' });
   }
-  if (session && session[2] === 'forks') return sendJson(response, 200, sessions.analyzeForks(session[1]));
+  if (session && session[2] === 'status') {
+    const agent = agents.forSession(session[1]);
+    return agent && agent.status ? sendJson(response, 200, await agent.status(session[1])) : sendJson(response, 404, { error: 'session_not_found' });
+  }
+  if (session && session[2] === 'goal') return codexSession(response, session[1], 'goal', { action: 'get' });
+  if (session && session[2] === 'forks') return sendJson(response, 200, (agents.forSession(session[1]) || agents.DEFAULT).forks(session[1]));
   if (pathname === '/commands') {
     const cwd = (params.get('cwd') || [null])[0];
-    return sendJson(response, 200, await commands.catalog(cwd && sessions.inWorkspace(cwd) ? cwd : sessions.workspace()));
+    const agent = agents.get((params.get('agent') || [agents.DEFAULT.id])[0]);
+    if (agent === null) return sendJson(response, 400, { error: 'bad_agent', allowed: agents.ids() });
+    return sendJson(response, 200, await agent.catalog(cwd && sessions.inWorkspace(cwd) ? cwd : sessions.workspace()));
   }
   if (pathname === '/sessions') {
     const listed = listSessions();
-    return sendJson(response, 200, { sessions: listed, workspace: sessions.workspace(), workspaces: sessions.workspaces(), ...sessionDiagnostics(listed) });
+    return sendJson(response, 200, { sessions: listed, agents: agents.ids(), workspace: sessions.workspace(), workspaces: sessions.workspaces(), ...agents.DEFAULT.diagnostics(listed) });
   }
   if (session && session[2] === 'messages') return sessionMessages(response, session[1], params);
   return sendError(response, 404);
+}
+
+// /compact, /goal and /feedback act on a Codex thread
+async function codexSession(response, sessionId, action, body) {
+  const agent = agents.forSession(sessionId);
+  if (!agent || !agent.session) return sendJson(response, 404, { error: 'session_not_found' });
+  try {
+    return sendJson(response, 200, await agent.session(sessionId, action, body));
+  } catch (error) {
+    if (error instanceof TaskError) return sendJson(response, error.status, { error: error.code, ...error.detail });
+    throw error;
+  }
 }
 
 const field = (body, key) => (Object.prototype.hasOwnProperty.call(body, key) ? body[key] : null);
@@ -459,16 +455,19 @@ function setPrefs(response, sessionId, body) {
     changes.model = body.model;
   }
   if ('effort' in body) {
-    if (body.effort !== null && !sessions.EFFORTS.includes(body.effort)) return sendJson(response, 400, { error: 'bad_effort', allowed: [...sessions.EFFORTS] });
     changes.effort = body.effort;
   }
-  if (sessions.findSessionFile(sessionId) === null) return sendJson(response, 404, { error: 'session_not_found' });
+  const agent = agents.forSession(sessionId);
+  if (agent === null) return sendJson(response, 404, { error: 'session_not_found' });
+  const efforts = agent.EFFORTS || sessions.EFFORTS;
+  if (changes.effort !== undefined && changes.effort !== null && !efforts.includes(changes.effort)) return sendJson(response, 400, { error: 'bad_effort', allowed: [...efforts] });
   return sendJson(response, 200, { session_id: sessionId, ...store.setPrefs(sessionId, changes) });
 }
 
 // Called by hook-approve.js; answers when the phone decides
 async function internalApproval(response, body) {
-  const task = runner.tasks.get(py.str(Object.prototype.hasOwnProperty.call(body, 'task_id') ? body.task_id : ''));
+  // the approval hook belongs to Claude Code
+  const task = runners.get('claude').tasks.get(py.str(Object.prototype.hasOwnProperty.call(body, 'task_id') ? body.task_id : ''));
   if (!task || task.status !== 'running') return sendJson(response, 200, { decision: 'deny', reason: 'unknown or finished task' });
   const toolName = py.str(Object.prototype.hasOwnProperty.call(body, 'tool_name') ? body.tool_name : '');
   const toolInput = py.isDict(body.tool_input) ? body.tool_input : {};
@@ -487,11 +486,24 @@ async function routePost(response, pathname, body) {
   const approval = APPROVAL_PATH.exec(pathname);
   const session = SESSION_PATH.exec(pathname);
   if (pathname === '/tasks') {
-    const created = runner.submit(field(body, 'prompt'), field(body, 'session_id'), field(body, 'cwd'), field(body, 'mode'),
-      py.truthy(field(body, 'force')), field(body, 'images'), field(body, 'model'), field(body, 'effort'));
+    const sid = field(body, 'session_id');
+    const named = field(body, 'agent');
+    const agent = named !== null ? agents.get(named) : (sid !== null && agents.forSession(sid)) || agents.DEFAULT;
+    if (agent === null) return sendJson(response, 400, { error: 'bad_agent', allowed: agents.ids() });
+    const created = runners.get(agent.id).submit(field(body, 'prompt'), field(body, 'session_id'), field(body, 'cwd'), field(body, 'mode'),
+      py.truthy(field(body, 'force')), field(body, 'images'), field(body, 'model'), field(body, 'effort'), field(body, 'review'));
     return sendJson(response, 202, created.public());
   }
-  if (task && task[2]) return sendJson(response, 202, runner.cancel(task[1]).public());
+  if (task && task[2] === '/steer') {
+    const owner = [...runners.values()].find((r) => r.tasks.has(task[1]));
+    if (!owner) return sendJson(response, 404, { error: 'task_not_found' });
+    if (!owner.steer) return sendJson(response, 400, { error: 'steer_not_supported' });
+    return sendJson(response, 200, (await owner.steer(task[1], field(body, 'prompt'))).public());
+  }
+  if (task && task[2]) {
+    const owner = [...runners.values()].find((r) => r.tasks.has(task[1])) || runners.get(agents.DEFAULT.id);
+    return sendJson(response, 202, owner.cancel(task[1]).public());
+  }
   if (approval) {
     const decision = field(body, 'decision');
     if (decision !== 'allow' && decision !== 'deny') return sendJson(response, 400, { error: 'decision_must_be_allow_or_deny' });
@@ -500,11 +512,12 @@ async function routePost(response, pathname, body) {
   if (session && session[2] === 'mode') {
     const mode = field(body, 'mode');
     if (!sessions.MODES.includes(mode)) return sendJson(response, 400, { error: 'bad_mode', allowed: [...sessions.MODES] });
-    if (sessions.findSessionFile(session[1]) === null) return sendJson(response, 404, { error: 'session_not_found' });
+    if (agents.forSession(session[1]) === null) return sendJson(response, 404, { error: 'session_not_found' });
     store.setMode(session[1], mode);
     return sendJson(response, 200, { session_id: session[1], mode });
   }
   if (session && session[2] === 'prefs') return setPrefs(response, session[1], body);
+  if (session && ['goal', 'compact', 'feedback'].includes(session[2])) return codexSession(response, session[1], session[2], body);
   if (pathname === '/internal/approval') return internalApproval(response, body);
   if (pathname === '/internal/workspace') {
     // other VS Code windows on this computer announce their folder (heartbeat) or leave; nginx never lets this through
@@ -556,7 +569,7 @@ async function handle(request, response) {
   }
 }
 
-function main() {
+async function main() {
   fs.mkdirSync(STATE_DIR, { recursive: true, mode: 0o700 });
   fs.chmodSync(STATE_DIR, 0o700);
   TOKEN = loadToken();
@@ -566,7 +579,13 @@ function main() {
   }
   store = new sessions.SessionStore(path.join(STATE_DIR, 'state.json'));
   approvals = new Approvals(publish, Number(process.env.BRIDGE_APPROVAL_TIMEOUT || '600'));
-  runner = new Runner(store, approvals, publish, STATE_DIR, `http://127.0.0.1:${PORT}`, TOKEN);
+  // before the runners attach to the Codex app-server: the editor's Codex and this Bridge share one
+  for (const agent of agents.AGENTS) {
+    if (!agent.startTakeover) continue;
+    const result = await agent.startTakeover((line) => console.log(line)).catch((error) => `failed: ${error.message}`);
+    console.log(`Codex takeover: ${result}`);
+  }
+  for (const agent of agents.AGENTS) runners.set(agent.id, agent.createRunner(store, approvals, publish, STATE_DIR, `http://127.0.0.1:${PORT}`, TOKEN));
   watchEvents();
   const server = http.createServer({ requestTimeout: 0, headersTimeout: 60000 }, handle);
   server.keepAliveTimeout = 5000;
@@ -580,8 +599,9 @@ function main() {
     console.log(`State:  ${STATE_DIR} (token in ${path.join(STATE_DIR, 'token')})`);
   });
   for (const sig of ['SIGTERM', 'SIGINT']) process.on(sig, () => process.exit(0));
+  process.on('exit', () => { for (const agent of agents.AGENTS) if (agent.close) agent.close(); });
 }
 
-if (require.main === module) main();
+if (require.main === module) main().catch((error) => { console.error(error.stack || error); process.exit(1); });
 
 module.exports = { normalize, uuid5Url, parseTarget };

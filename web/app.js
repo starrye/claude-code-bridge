@@ -4,7 +4,9 @@
   const TOKEN_KEY = "bridge_token";
   const COMPUTER_KEY = "bridge_computer";
   const MODE_LABEL = { ask: "询问", auto: "自动", readonly: "只读" };
-  const SOURCE_LABEL = { "claude-vscode": "VS Code", cli: "终端", "feishu-bridge": "Agent" };
+  const SOURCE_LABEL = { "claude-vscode": "VS Code", cli: "终端", "feishu-bridge": "Agent", "codex-vscode": "VS Code", "codex-cli": "终端", "codex-exec": "终端", codex: "Codex" };
+  const AGENT_LABEL = { claude: "Claude", codex: "Codex" };
+  const AGENT_KEY = "agentBridge.agent";
 
   const state = {
     token: localStorage.getItem(TOKEN_KEY) || "",
@@ -12,6 +14,8 @@
     computers: [],        // [{id, name, online}] this account's computers (empty when talking to a Bridge directly)
     computer: localStorage.getItem(COMPUTER_KEY) || "",   // id of the computer every request is for
     sessions: [],
+    agents: ["claude"],   // the agents this computer offers
+    draftAgent: localStorage.getItem(AGENT_KEY) || "claude",
     current: null,        // session_id or null
     branchOpen: false,
     closedOpen: new Set(),   // windows whose fold of closed sessions is expanded
@@ -27,6 +31,7 @@
     rendered: new Set(),  // ids of history items already on screen (never draw one twice)
     approvals: new Map(), // approval_id -> approval
     myTask: null,         // {task_id, session_id}
+    earlyFinished: new Map(),   // task_finished events that arrived before the POST reply named their task
     live: null,           // {task_id, el, text}
     busySend: false,      // true only while a POST /tasks is in flight
     draftMode: "ask",     // phone-side mode for a session that does not exist yet
@@ -43,8 +48,14 @@
 
   // Track the visible area so the composer stays above the on-screen keyboard (iOS keeps the layout height fixed).
   if (window.visualViewport) {
+    let lastH = window.visualViewport.height;
     const fit = () => {
-      document.documentElement.style.setProperty("--app-h", window.visualViewport.height + "px");
+      const h = window.visualViewport.height;
+      document.documentElement.style.setProperty("--app-h", h + "px");
+      // the keyboard shrinks the list from below: push the messages up by the same amount so the latest stay visible
+      const box = document.getElementById("messages");
+      if (box && h < lastH) box.scrollTop += lastH - h;
+      lastH = h;
       if (window.visualViewport.offsetTop) window.scrollTo(0, 0);
     };
     window.visualViewport.addEventListener("resize", fit);
@@ -130,6 +141,18 @@
     check: [["path", { d: "m5 10.5 3.2 3.2L15 7" }]],
     slash: [["rect", { x: 3.5, y: 3.5, width: 13, height: 13, rx: 2 }], ["path", { d: "M11.5 6.5 8.5 13.5" }]],
     clock: [["circle", { cx: 10, cy: 10, r: 7 }], ["path", { d: "M10 6.2V10l2.6 1.6" }]],
+    sk_select: [["path", { d: "M4.5 3.5 15.5 8l-4.7 1.6L9 14.5z" }]],
+    sk_pen: [["path", { d: "M13.5 3.5l3 3L7 16l-4 1 1-4z" }]],
+    sk_text: [["path", { d: "M4.5 5.5v-1.5h11v1.5M10 4v12M7.5 16h5" }]],
+    sk_shape: [["rect", { x: 3, y: 8, width: 9, height: 9, rx: 2 }], ["circle", { cx: 12.5, cy: 7.5, r: 4.5 }]],
+    sk_eraser: [["path", { d: "M3.5 12.5 11 4.5l5 5-6.5 6.5H6.2z" }], ["path", { d: "M8 8l5 5" }]],
+    sk_undo: [["path", { d: "M7 5 3.5 8.5 7 12" }], ["path", { d: "M4 8.5h7a4 4 0 0 1 0 8H8" }]],
+    sk_redo: [["path", { d: "M13 5l3.5 3.5L13 12" }], ["path", { d: "M16 8.5H9a4 4 0 0 0 0 8h3" }]],
+    sk_close: [["path", { d: "M5 5l10 10M15 5 5 15" }]],
+    sk_rect: [["rect", { x: 3.5, y: 5, width: 13, height: 10, rx: 1.5 }]],
+    sk_ellipse: [["ellipse", { cx: 10, cy: 10, rx: 7, ry: 5 }]],
+    sk_line: [["path", { d: "M4 16 16 4" }]],
+    sk_arrow: [["path", { d: "M4 16 16 4M9 4h7v7" }]],
     attach: [["path", { d: "M16 9.2 9.7 15.5a3.7 3.7 0 0 1-5.2-5.2l6.6-6.6a2.5 2.5 0 0 1 3.5 3.5L8 13.7a1.2 1.2 0 0 1-1.7-1.7l5.7-5.7" }]],
   };
   function icon(name, size) {
@@ -163,23 +186,9 @@
   function showPair() {
     if (sessionStorage.getItem("enroll_code")) return;   // the QR confirmation comes first
     $("pairPanel").hidden = false;
-    $("pairInput").focus();
   }
 
-  $("pairForm").addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const res = await fetch("/auth/pair", {
-      method: "POST", headers: { ...authHeaders(), "Content-Type": "application/json" },
-      body: JSON.stringify({ code: $("pairInput").value.trim() }),
-    }).catch(() => null);
-    const data = res ? await res.json().catch(() => ({})) : {};
-    if (res && res.ok) { location.reload(); return; }
-    $("pairError").textContent = !res ? "无法连接服务"
-      : data.error === "bad_code" ? "配对码不正确或已过期"
-      : data.error === "too_many_attempts" ? "尝试次数过多,请稍后再试"
-      : data.error === "connector_taken" ? "这台电脑已经绑定了别的账号"
-      : "绑定失败";
-  });
+  $("pairRetry").addEventListener("click", () => location.reload());
 
   function logout(message) {
     if (state.token.startsWith("dv_")) fetch("/auth/logout", { method: "POST", headers: authHeaders() }).catch(() => {});
@@ -314,6 +323,7 @@
     state.sessions = data.sessions || [];
     state.workspace = data.workspace || null;
     state.workspaces = data.workspaces || [];
+    state.agents = data.agents || ["claude"];
     state.diag = { host: data.host || null, hidden: data.hidden || 0, notice: data.notice || null };
     renderSessions();
     renderHeader();
@@ -372,6 +382,7 @@
       const busy = s.status === "busy" || s.busy_task;
       name.appendChild(el("span", "dot " + (busy ? "busy" : isClosed(s) ? "off" : "")));
       name.appendChild(el("span", "t", s.title || "新会话"));
+      if (state.agents.length > 1) name.appendChild(el("span", "badge agent " + (s.agent || "claude"), AGENT_LABEL[s.agent] || "Claude"));
       name.appendChild(el("span", "badge", SOURCE_LABEL[s.source] || s.source || "?"));
       if (pendingBySession.has(s.session_id)) name.appendChild(el("span", "badge", "待审批"));
       const meta = el("div", "meta", [busy ? "运行中" : isClosed(s) ? "已关闭" : "空闲", ago(s.updated_at)].filter(Boolean).join(" · "));
@@ -474,6 +485,9 @@
     return Boolean(mine || (s && s.busy_task));
   }
 
+  const currentAgent = () => { const s = currentSession(); return s ? s.agent || "claude" : state.draftAgent; };
+  const canSteer = () => currentAgent() === "codex";
+
   function applyComposerState() {
     const s = currentSession();
     const branchView = Boolean(state.branch);
@@ -481,13 +495,14 @@
     const editorBusy = Boolean(s && s.editor_open && s.status === "busy");
     const hasText = $("input").value.trim().length > 0 || state.attachments.length > 0;
     const btn = $("sendBtn");
-    const kind = running ? "stop" : "send";
+    const kind = running && !(hasText && canSteer()) ? "stop" : "send";
     if (btn.dataset.kind !== kind) {
       btn.textContent = "";
       btn.appendChild(icon(kind, 20));
       btn.dataset.kind = kind;
     }
-    const label = running ? "停止" : editorBusy ? "留言(电脑端空闲后送达)" : "发送";
+    const steer = running && hasText && canSteer();
+    const label = steer ? "插话" : running ? "停止" : editorBusy ? "留言(电脑端空闲后送达)" : "发送";
     btn.setAttribute("aria-label", label);
     btn.title = label;
     btn.disabled = branchView || state.busySend || (!running && !hasText);
@@ -495,6 +510,8 @@
     $("modeBtn").disabled = branchView;
     $("attachBtn").disabled = branchView;
     $("input").placeholder = branchView ? "分支为只读"
+      : running && canSteer() ? "运行中。输入内容可插话,空着点按钮停止…"
+      : s && s.agent === "codex" && s.editor_open ? "正在电脑上的 Codex 里使用。发送会先尝试接上,接不上可分叉续聊…"
       : editorBusy ? "电脑端正在运行。写下指导,它空闲后自动送达…"
       : "发送消息…";
     renderMode();
@@ -573,6 +590,8 @@
     const s = currentSession();
     $("hero").hidden = !inDraft();
     $("cwdBtn").textContent = "工作目录 " + (state.draftCwd || "服务默认目录") + "  ›";
+    $("agentBtn").hidden = state.agents.length < 2;
+    $("agentBtn").textContent = "用 " + (AGENT_LABEL[state.draftAgent] || state.draftAgent) + "  ⇄";
     if (!s) {
       $("title").textContent = state.draftCwd !== null ? "新对话" : "Agent Bridge";
       const draft = [state.draftCwd, state.draftPrefs.model && "模型: " + state.draftPrefs.model,
@@ -620,6 +639,7 @@
     close.addEventListener("click", () => box.remove());
     box.append(el("span", "", text), close);
     $("banners").appendChild(box);
+    return box;
   }
 
   function toolLine(summary) {
@@ -995,6 +1015,8 @@
         if (taskOnScreen(ev)) appendItem({ kind: "tool_result", tool_use_id: ev.tool_use_id, is_error: ev.is_error, text: "" });
         break;
       case "task_finished":
+        // a task that fails at once can be reported before the reply to its POST has set myTask
+        if (!ownTask(ev)) { state.earlyFinished.set(ev.task_id, ev); if (state.earlyFinished.size > 20) state.earlyFinished.delete(state.earlyFinished.keys().next().value); }
         onTaskFinished(ev);
         break;
       case "approval_requested":
@@ -1014,11 +1036,33 @@
   async function onTaskFinished(ev) {
     const mine = state.myTask && state.myTask.task_id === ev.task_id;
     clearQueued(ev.task_id);
+    const forkOf = mine && state.myTask.fork_of;
+    const lockedPrompt = mine && state.myTask.prompt;
     if (mine) {
       state.myTask = null;
       setSending(false);
     }
     await loadSessions();
+    if (forkOf && ev.status === "failed") {
+      // the copy never got going, so it was not saved: stay on the original and give the message back
+      await selectSession(forkOf);
+      if (lockedPrompt && !$("input").value) { $("input").value = lockedPrompt; autosize(); }
+      banner("分叉续聊失败:" + (ev.error || "未知错误") + "。消息已放回输入框。", true);
+      return;
+    }
+    if (forkOf && ev.session_id && ev.session_id !== forkOf) { await selectSession(ev.session_id); return; }
+    if (mine && ev.error === "editor_locked") {
+      // the message was cleared on send; put it back so a refused send is not lost
+      if (lockedPrompt && !$("input").value) { $("input").value = lockedPrompt; autosize(); }
+      const box = banner("这个会话正在电脑上的 Codex 里打开,手机接不上。可以分叉一份继续聊(原会话不受影响),或在电脑上关掉它后重试。", true);
+      if (box && lockedPrompt) {
+        const btn = el("button", "chip", "分叉续聊");
+        btn.type = "button";
+        btn.addEventListener("click", () => { box.remove(); forkSession(ev.session_id, lockedPrompt); });
+        box.appendChild(btn);
+      }
+      return;
+    }
     if (ev.session_id && ev.session_id === state.current) {
       // Replace the optimistic/live view with the persisted transcript.
       await loadMessages(true);
@@ -1030,7 +1074,7 @@
         if (ev.status === "cancelled") banner("任务已取消。已经执行完的操作不会回滚。");
         else if (ev.status === "failed") banner("任务失败:" + (ev.error || "未知错误"), true);
         const s = currentSession();
-        if (s && s.source === "claude-vscode") banner("电脑端 VS Code 里这个会话不会自动刷新:请先关闭再重新打开它,再继续在电脑上输入,否则会产生分叉。");
+        if (s && s.source === "claude-vscode" && ev.status !== "failed") banner("电脑端 VS Code 里这个会话不会自动刷新:请先关闭再重新打开它,再继续在电脑上输入,否则会产生分叉。");
         if ((ev.warnings || []).includes("session_forked")) banner("检测到会话分叉,请在电脑端重新打开该会话。", true);
       }
       scrollDown();
@@ -1289,12 +1333,23 @@
         ["清空对话", () => { closeFloatingPicker(); newChat(); }],
       ];
       (cmds ? cmds.commands : []).filter((c) => c.kind === "claude").forEach((c) =>
-        ctx.push(["/" + c.name, () => { closeFloatingPicker(); $("input").value = "/" + c.name + (c.arg ? " " : ""); autosize(); applyComposerState(); $("input").focus(); }, c.desc]));
-      const shown = ctx.filter(([l, , d]) => !q || l.toLowerCase().includes(q) || (d || "").toLowerCase().includes(q));
+        ctx.push(["/" + c.name, () => { closeFloatingPicker(); $("input").value = "/" + c.name + (c.arg || c.kind === "skill" ? " " : ""); autosize(); applyComposerState(); $("input").focus(); }, c.desc]));
+      const matches = ([l, , d]) => !q || l.toLowerCase().includes(q) || (d || "").toLowerCase().includes(q);
+      const shown = ctx.filter(matches);
       if (shown.length) {
         body.appendChild(el("div", "fpHead", "对话"));
         shown.forEach(([l, f, d]) => body.appendChild(row(l, d, f)));
       }
+      // Codex: the commands run from a tap, skills fill in their name
+      const list = cmds ? cmds.commands : [];
+      const codexCommands = list.filter((c) => c.kind === "codex").map((c) => ["/" + c.name, () => { closeFloatingPicker(); handleSlash("/" + c.name); }, c.desc]).filter(matches);
+      const skills = list.filter((c) => c.kind === "skill").map((c) => ["/" + c.name, () => { closeFloatingPicker(); $("input").value = "/" + c.name + " "; autosize(); applyComposerState(); $("input").focus(); }, c.desc]).filter(matches);
+      [["命令", codexCommands], ["技能", skills]].forEach(([title, rows]) => {
+        if (!rows.length) return;
+        if (body.children.length) body.appendChild(el("hr", "fpSep"));
+        body.appendChild(el("div", "fpHead", title));
+        rows.forEach(([l, f, d]) => body.appendChild(row(l, d, f)));
+      });
       if (!q || "模型 强度 model effort".includes(q)) {
         if (shown.length) body.appendChild(el("hr", "fpSep"));
         body.appendChild(el("div", "fpHead", "模型"));
@@ -1351,10 +1406,12 @@
   const COMMANDS_STALE_MS = 5 * 60 * 1000;
 
   async function loadCommands(force) {
-    if (!force && state.cmds && Date.now() - state.cmds.at < COMMANDS_STALE_MS) return state.cmds;
+    const agent = currentAgent();
+    if (!force && state.cmds && state.cmds.agent === agent && Date.now() - state.cmds.at < COMMANDS_STALE_MS) return state.cmds;
     const cwd = (currentSession() && currentSession().cwd) || state.draftCwd || "";
-    const { ok, data } = await api("GET", "/commands" + (cwd ? "?cwd=" + encodeURIComponent(cwd) : ""));
-    if (ok) state.cmds = { ...data, at: Date.now() };
+    const query = [cwd && "cwd=" + encodeURIComponent(cwd), agent !== "claude" && "agent=" + agent].filter(Boolean).join("&");
+    const { ok, data } = await api("GET", "/commands" + (query ? "?" + query : ""));
+    if (ok) state.cmds = { ...data, agent, at: Date.now() };
     // the skills are fetched in the background on the first request; ask again shortly
     if (ok && data.pending && !state.cmdsRetry && (state.cmdsTries || 0) < 10) {
       state.cmdsTries = (state.cmdsTries || 0) + 1;
@@ -1382,8 +1439,8 @@
       item.setAttribute("role", "option");
       item.append(el("span", "sname", "/" + c.name), el("span", "sdesc", [c.desc, c.arg && "参数: " + c.arg].filter(Boolean).join(" · ")));
       item.addEventListener("click", () => {
-        if (c.kind !== "claude") { handleSlash("/" + c.name); return; }   // local commands open their picker directly
-        $("input").value = "/" + c.name + (c.arg ? " " : "");
+        if (c.kind !== "claude" && c.kind !== "skill") { handleSlash("/" + c.name); return; }   // local commands open their picker directly
+        $("input").value = "/" + c.name + (c.arg || c.kind === "skill" ? " " : "");
         closeSlashMenu();
         autosize();
         applyComposerState();
@@ -1465,7 +1522,7 @@
       return true;
     }
     if (known.kind === "claude" && known.needs_session && !state.current) { toast(`/${name} 需要在已有会话里使用`); return true; }
-    if (known.kind === "claude") return false;                           // sent on as the prompt
+    if (known.kind === "claude" || known.kind === "skill") return false;  // sent on as the prompt
     $("input").value = "";
     closeSlashMenu();
     autosize();
@@ -1473,7 +1530,291 @@
     if (name === "model") await chooseModel(arg);
     else if (name === "effort") await chooseEffort(arg);
     else if (name === "clear") newChat();
+    else if (name === "status") await showStatus();
+    else if (name === "init") await send({ prompt: INIT_PROMPT, label: "/init" });
+    else if (name === "review") await chooseReview(arg);
+    else if (name === "compact") await compactSession();
+    else if (name === "goal") await manageGoal(arg);
+    else if (name === "feedback") await sendFeedback();
+    else if (name === "sketch") openSketch();
     return true;
+  }
+
+  const INIT_PROMPT = "请分析这个仓库,在根目录创建 AGENTS.md:写明项目结构、构建与测试命令、代码风格和注意事项,供之后的 Codex 会话参考。已存在时只做必要的补充。";
+
+  const needSession = (name) => { if (state.current) return true; toast(`/${name} 需要在已有会话里使用`); return false; };
+  const apiError = (res) => ({ editor_locked: "这个会话正在电脑上的 Codex 里使用,先在电脑上关闭它", session_not_found: "找不到这个会话" })[res.data.error] || res.data.reason || res.data.error || res.status;
+
+  async function chooseReview(arg) {
+    if (arg) { await send({ review: { type: "custom", instructions: arg }, label: "/review " + arg }); return; }
+    const rows = {
+      uncommitted: { label: "未提交的更改", desc: "审查工作区里还没提交的改动" },
+      branch: { label: "与分支比较…", desc: "审查当前分支相对某个基础分支的改动" },
+      commit: { label: "某个提交…", desc: "审查指定提交" },
+      custom: { label: "自定义说明…", desc: "按你写的要求审查" },
+    };
+    openFloatingPicker("代码审查", Object.keys(rows), null, rows, async (kind) => {
+      let review, label;
+      if (kind === "uncommitted") { review = { type: "uncommittedChanges" }; label = "/review 未提交的更改"; }
+      else if (kind === "branch") {
+        const branch = (window.prompt("基础分支名(如 main)", "main") || "").trim();
+        if (!branch) return;
+        review = { type: "baseBranch", branch }; label = "/review 与分支 " + branch + " 比较";
+      } else if (kind === "commit") {
+        const sha = (window.prompt("提交的哈希(至少 7 位)") || "").trim();
+        if (!sha) return;
+        review = { type: "commit", sha }; label = "/review 提交 " + sha;
+      } else {
+        const instructions = (window.prompt("审查要求") || "").trim();
+        if (!instructions) return;
+        review = { type: "custom", instructions }; label = "/review " + instructions;
+      }
+      await send({ review, label });
+    });
+  }
+
+  async function compactSession() {
+    if (!needSession("compact")) return;
+    const res = await api("POST", `/sessions/${state.current}/compact`, {});
+    toast(res.ok ? "已开始压缩上下文" : "压缩失败:" + apiError(res));
+  }
+
+  const GOAL_STATUS = { active: "进行中", paused: "已暂停", blocked: "受阻", usageLimited: "用量受限", budgetLimited: "超出预算", complete: "已完成" };
+  async function manageGoal(arg) {
+    if (!needSession("goal")) return;
+    const url = `/sessions/${state.current}/goal`;
+    const act = async (body) => {
+      const res = await api("POST", url, body);
+      toast(res.ok ? "目标已更新" : "目标设置失败:" + apiError(res));
+    };
+    if (arg) { await act({ action: "set", objective: arg }); return; }
+    const res = await api("GET", url);
+    if (!res.ok) { toast("取不到目标:" + apiError(res)); return; }
+    const goal = res.data.goal;
+    const rows = {};
+    if (goal) {
+      const used = goal.tokenBudget ? `${goal.tokensUsed} / ${goal.tokenBudget} tokens` : `${goal.tokensUsed} tokens`;
+      rows.info = { label: goal.objective, desc: `${GOAL_STATUS[goal.status] || goal.status} · 已用 ${used}` };
+      rows[goal.status === "paused" ? "resume" : "pause"] = goal.status === "paused" ? { label: "继续", desc: "继续追求这个目标" } : { label: "暂停", desc: "先停下来" };
+      rows.clear = { label: "清除目标", desc: "" };
+    }
+    rows.set = { label: goal ? "设置新目标…" : "设置目标…", desc: "写下要持续追求的目标" };
+    openFloatingPicker("目标", Object.keys(rows), null, rows, async (key) => {
+      if (key === "set") {
+        const objective = (window.prompt("目标") || "").trim();
+        if (objective) await act({ action: "set", objective });
+      } else if (key !== "info") await act({ action: key });
+    });
+  }
+
+  const FEEDBACK_KINDS = {
+    bad_result: { label: "结果不好", desc: "回答或改动不符合预期" },
+    good_result: { label: "结果很好", desc: "" },
+    bug: { label: "程序有问题", desc: "报告一个 bug" },
+    other: { label: "其他", desc: "" },
+  };
+  async function sendFeedback() {
+    if (!needSession("feedback")) return;
+    openFloatingPicker("发送反馈", Object.keys(FEEDBACK_KINDS), null, FEEDBACK_KINDS, async (classification) => {
+      const reason = (window.prompt("补充说明(可留空)") || "").trim();
+      if (!window.confirm("反馈和这个会话的信息会发送给 OpenAI。确定发送吗?")) return;
+      const res = await api("POST", `/sessions/${state.current}/feedback`, { classification, reason });
+      toast(res.ok ? "反馈已发送" : "发送失败:" + apiError(res));
+    });
+  }
+
+  // ---------- sketch: draw on a dark canvas (pen, shapes, text, eraser, select), then attach it as an image ----------
+  const SKETCH_COLORS = ["#ffffff", "#6b7280", "#8b4a1f", "#d93a2f", "#ef7d2b", "#e8a62f", "#4ba04f", "#3a9188", "#4fb3d3", "#2f6bea", "#4f46e0", "#9a3be0", "#d03a7e"];
+  const SKETCH_BG = "#202020";
+  const SKETCH_TOOLS = [["select", "选择"], ["pen", "画笔"], ["text", "文字"], ["shape", "形状"], ["eraser", "橡皮"]];
+  const SKETCH_SHAPES = [["rect", "矩形"], ["ellipse", "椭圆"], ["line", "直线"], ["arrow", "箭头"]];
+
+  function openSketch() {
+    if (state.attachments.length >= MAX_ATTACHMENTS) { toast(`最多添加 ${MAX_ATTACHMENTS} 张图片`); return; }
+    const root = $("sketch");
+    const canvas = $("sketchCanvas");
+    root.hidden = false;
+    const box = root.getBoundingClientRect();
+    const W = Math.max(1, Math.round(box.width)), H = Math.max(1, Math.round(box.height));
+    const px = Math.min(window.devicePixelRatio || 1, 2, 1600 / Math.max(W, H));
+    canvas.width = Math.round(W * px); canvas.height = Math.round(H * px);
+    const ctx = canvas.getContext("2d");
+    let objects = [], undo = [], redo = [], tool = "pen", shape = "rect", color = SKETCH_COLORS[0], width = 6, selected = null, act = null;
+    const snap = () => JSON.stringify(objects);
+    const restore = (text) => { objects = JSON.parse(text); selected = null; render(); };
+
+    const distSeg = (x, y, a, b) => {
+      const dx = b[0] - a[0], dy = b[1] - a[1], len = dx * dx + dy * dy;
+      const t = len ? Math.max(0, Math.min(1, ((x - a[0]) * dx + (y - a[1]) * dy) / len)) : 0;
+      return Math.hypot(x - (a[0] + t * dx), y - (a[1] + t * dy));
+    };
+    const font = (o) => `${o.size}px sans-serif`;
+    const bbox = (o) => {
+      if (o.type === "stroke") { const xs = o.points.map((p) => p[0]), ys = o.points.map((p) => p[1]); return [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)]; }
+      if (o.type === "shape") return [Math.min(o.x1, o.x2), Math.min(o.y1, o.y2), Math.max(o.x1, o.x2), Math.max(o.y1, o.y2)];
+      ctx.font = font({ size: o.size * px }); return [o.x, o.y, o.x + ctx.measureText(o.text).width / px, o.y + o.size];
+    };
+    const hit = (o, x, y) => {
+      const pad = 10;
+      if (o.type === "stroke") {
+        const pts = o.points;
+        return pts.length === 1 ? Math.hypot(x - pts[0][0], y - pts[0][1]) <= o.width + pad : pts.some((p, i) => i && distSeg(x, y, pts[i - 1], p) <= o.width / 2 + pad);
+      }
+      const [a, b, c, d] = bbox(o);
+      return x >= a - pad && x <= c + pad && y >= b - pad && y <= d + pad;
+    };
+    const move = (o, dx, dy) => {
+      if (o.type === "stroke") o.points.forEach((p) => { p[0] += dx; p[1] += dy; });
+      else if (o.type === "shape") { o.x1 += dx; o.x2 += dx; o.y1 += dy; o.y2 += dy; } else { o.x += dx; o.y += dy; }
+    };
+    const paint = (o) => {
+      ctx.strokeStyle = o.color; ctx.fillStyle = o.color; ctx.lineWidth = o.width; ctx.lineCap = "round"; ctx.lineJoin = "round";
+      if (o.type === "stroke") {
+        ctx.beginPath();
+        o.points.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+        if (o.points.length === 1) { ctx.arc(o.points[0][0], o.points[0][1], o.width / 2, 0, Math.PI * 2); ctx.fill(); } else ctx.stroke();
+      } else if (o.type === "shape") {
+        const [a, b, c, d] = bbox(o);
+        ctx.beginPath();
+        if (o.kind === "rect") ctx.rect(a, b, c - a, d - b);
+        else if (o.kind === "ellipse") ctx.ellipse((a + c) / 2, (b + d) / 2, Math.max(1, (c - a) / 2), Math.max(1, (d - b) / 2), 0, 0, Math.PI * 2);
+        else {
+          ctx.moveTo(o.x1, o.y1); ctx.lineTo(o.x2, o.y2);
+          if (o.kind === "arrow") {
+            const ang = Math.atan2(o.y2 - o.y1, o.x2 - o.x1), head = 12 + o.width * 2;
+            [-0.45, 0.45].forEach((t) => { ctx.moveTo(o.x2, o.y2); ctx.lineTo(o.x2 - head * Math.cos(ang + t), o.y2 - head * Math.sin(ang + t)); });
+          }
+        }
+        ctx.stroke();
+      } else { ctx.font = font(o); ctx.textBaseline = "top"; ctx.fillText(o.text, o.x, o.y); }
+    };
+    function render(withSelection = true) {
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.fillStyle = SKETCH_BG; ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.setTransform(px, 0, 0, px, 0, 0);
+      objects.forEach(paint);
+      if (withSelection && selected) {
+        const [a, b, c, d] = bbox(selected);
+        ctx.save(); ctx.strokeStyle = "#5b9dff"; ctx.lineWidth = 1.5; ctx.setLineDash([6, 4]); ctx.strokeRect(a - 6, b - 6, c - a + 12, d - b + 12); ctx.restore();
+      }
+    }
+    const at = (e) => { const r = canvas.getBoundingClientRect(); return [(e.clientX - r.left) * W / r.width, (e.clientY - r.top) * H / r.height]; };
+    const hist = () => { $("skUndo").disabled = !undo.length; $("skRedo").disabled = !redo.length; };
+    const commit = (before) => { if (snap() !== before) { undo.push(before); redo.length = 0; } hist(); };
+    const sizeOf = () => width * 3 + 12;
+
+    canvas.onpointerdown = (e) => {
+      e.preventDefault();
+      canvas.setPointerCapture(e.pointerId);
+      const [x, y] = at(e);
+      const before = snap();
+      if (tool === "pen") { const o = { type: "stroke", color, width, points: [[x, y]] }; objects.push(o); act = { before, o }; }
+      else if (tool === "shape") { const o = { type: "shape", kind: shape, color, width, x1: x, y1: y, x2: x, y2: y }; objects.push(o); act = { before, o }; }
+      else if (tool === "text") {
+        const text = (window.prompt("文字") || "").trim();
+        if (text) { objects.push({ type: "text", color, size: sizeOf(), x, y, text }); commit(before); }
+      } else if (tool === "eraser") { act = { before }; objects = objects.filter((o) => !hit(o, x, y)); }
+      else { selected = [...objects].reverse().find((o) => hit(o, x, y)) || null; act = selected ? { before, x, y } : null; }
+      render();
+    };
+    canvas.onpointermove = (e) => {
+      if (!act) return;
+      const [x, y] = at(e);
+      if (tool === "pen") act.o.points.push([x, y]);
+      else if (tool === "shape") { act.o.x2 = x; act.o.y2 = y; }
+      else if (tool === "eraser") objects = objects.filter((o) => !hit(o, x, y));
+      else if (selected) { move(selected, x - act.x, y - act.y); act.x = x; act.y = y; }
+      render();
+    };
+    const lift = () => {
+      if (!act) return;
+      const done = act; act = null;
+      if (tool === "shape" && Math.hypot(done.o.x2 - done.o.x1, done.o.y2 - done.o.y1) < 4) objects.pop();
+      commit(done.before); render();
+    };
+    canvas.onpointerup = lift; canvas.onpointercancel = lift;
+
+    // toolbar
+    const tools = $("skTools");
+    tools.textContent = "";
+    const pick = (name) => {
+      tool = name; selected = null; render();
+      tools.querySelectorAll("button").forEach((b) => b.classList.toggle("on", b.dataset.tool === name));
+      $("skShapes").hidden = name !== "shape";
+    };
+    SKETCH_TOOLS.forEach(([name, label]) => {
+      const b = el("button", "skBtn"); b.type = "button"; b.dataset.tool = name; b.title = label; b.setAttribute("aria-label", label);
+      b.appendChild(icon("sk_" + name, 22));
+      b.addEventListener("click", () => pick(name));
+      tools.appendChild(b);
+    });
+    const shapes = $("skShapes");
+    shapes.textContent = "";
+    SKETCH_SHAPES.forEach(([name, label]) => {
+      const b = el("button", "skBtn" + (name === shape ? " on" : "")); b.type = "button"; b.dataset.shape = name; b.title = label; b.setAttribute("aria-label", label);
+      b.appendChild(icon("sk_" + name, 20));
+      b.addEventListener("click", () => { shape = name; shapes.querySelectorAll("button").forEach((x) => x.classList.toggle("on", x === b)); });
+      shapes.appendChild(b);
+    });
+    // color and thickness also change the selected object
+    const retouch = (fn) => { if (!selected) return; const before = snap(); fn(selected); commit(before); render(); };
+    const palette = $("skColors");
+    palette.textContent = "";
+    const custom = el("label", "swatch rainbow"); custom.title = "自定义颜色";
+    const picker = el("input"); picker.type = "color"; picker.value = "#ffffff";
+    picker.addEventListener("input", () => { color = picker.value; palette.querySelectorAll(".swatch").forEach((x) => x.classList.remove("on")); retouch((o) => { o.color = color; }); });
+    custom.appendChild(picker);
+    palette.appendChild(custom);
+    SKETCH_COLORS.forEach((c) => {
+      const b = el("button", "swatch" + (c === color ? " on" : "")); b.type = "button"; b.style.background = c; b.setAttribute("aria-label", "颜色 " + c);
+      b.addEventListener("click", () => { color = c; palette.querySelectorAll(".swatch").forEach((x) => x.classList.toggle("on", x === b)); retouch((o) => { o.color = c; }); });
+      palette.appendChild(b);
+    });
+    const slider = $("skWidth");
+    slider.value = String(width);
+    slider.oninput = () => { width = Number(slider.value); retouch((o) => { if (o.type === "text") o.size = sizeOf(); else o.width = width; }); };
+
+    $("skUndo").onclick = () => { if (undo.length) { redo.push(snap()); restore(undo.pop()); hist(); } };
+    $("skRedo").onclick = () => { if (redo.length) { undo.push(snap()); restore(redo.pop()); hist(); } };
+    const close = () => { root.hidden = true; canvas.onpointerdown = canvas.onpointermove = canvas.onpointerup = canvas.onpointercancel = null; };
+    $("skClose").onclick = close;
+    $("skDone").onclick = () => {
+      if (!objects.length) { toast("还没有画任何东西"); return; }
+      render(false);
+      let url = canvas.toDataURL("image/png");
+      let media = "image/png";
+      if (url.length > MAX_DATA_URL) { url = canvas.toDataURL("image/jpeg", 0.85); media = "image/jpeg"; }
+      state.attachments.push({ media_type: media, data: url.slice(url.indexOf(",") + 1), url });
+      renderAttachments();
+      applyComposerState();
+      close();
+      toast("草图已添加,写点说明后发送");
+    };
+    $("skClose").replaceChildren(icon("sk_close", 22));
+    $("skUndo").replaceChildren(icon("sk_undo", 22));
+    $("skRedo").replaceChildren(icon("sk_redo", 22));
+    $("skDone").replaceChildren(icon("check", 24));
+    pick("pen");
+    hist();
+  }
+
+  async function showStatus() {
+    if (!state.current) { toast("/status 需要在已有会话里使用"); return; }
+    const { ok, data } = await api("GET", `/sessions/${state.current}/status`);
+    if (!ok) { toast("取不到状态:" + (data.error || "")); return; }
+    const s = currentSession();
+    const rows = {
+      id: { label: "会话 ID", desc: data.session_id },
+      model: { label: "模型", desc: modelLabel(currentPref("model") || data.model, data.model) },
+    };
+    const effort = currentPref("effort");
+    if (effort) rows.effort = { label: "思考强度", desc: (EFFORT_INFO[effort] || { label: effort }).label };
+    data.limits.forEach((l, i) => {
+      const window = l.window_mins ? (l.window_mins >= 1440 ? Math.round(l.window_mins / 1440) + " 天" : l.window_mins >= 60 ? Math.round(l.window_mins / 60) + " 小时" : l.window_mins + " 分钟") : "";
+      const reset = l.resets_at ? " · " + new Date(l.resets_at * 1000).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }) + " 重置" : "";
+      rows["limit" + i] = { label: "用量" + (window ? "(" + window + ")" : ""), desc: `已用 ${Math.round(l.used_percent)}%${reset}` };
+    });
+    openFloatingPicker("状态" + (s && s.title ? " · " + s.title : ""), Object.keys(rows), null, rows, () => {});
   }
 
   // ---------- sending ----------
@@ -1484,6 +1825,7 @@
 
   const SEND_ERRORS = {
     session_busy: "这个会话已有任务在运行",
+    session_not_found: "找不到这个会话(可能是分叉没有成功),请在左侧重新选择会话",
     image_too_large: "图片太大,请换一张小一点的",
     body_too_large: "图片总大小超出限制,请少选几张",
     unsupported_image_type: "不支持这种图片格式",
@@ -1493,19 +1835,22 @@
     too_many_images: `最多添加 ${MAX_ATTACHMENTS} 张图片`,
   };
 
-  async function send() {
+  // override: a command that sends something other than the typed text: { prompt, label } or { review, label }
+  async function send(override = null) {
     const input = $("input");
-    const prompt = input.value.trim();
+    const prompt = override && override.prompt !== undefined ? override.prompt : input.value.trim();
     const images = state.attachments;
-    if ((!prompt && !images.length) || state.busySend) return;
-    if (input.value.startsWith("/") && !images.length && await handleSlash(input.value.trim())) return;
+    if ((!prompt && !images.length && !(override && override.review)) || state.busySend) return;
+    if (!override && input.value.startsWith("/") && !images.length && await handleSlash(input.value.trim())) return;
     if (!state.current && state.draftCwd === null) { toast("请先选择会话或新建会话"); return; }
     setSending(true);
     const body = { prompt, mode: currentMode() };
+    if (override && override.review) body.review = override.review;
     if (images.length) body.images = images.map(({ media_type, data }) => ({ media_type, data }));
     if (state.current) body.session_id = state.current;
     else {
       if (state.draftCwd) body.cwd = state.draftCwd;
+      if (state.agents.includes(state.draftAgent)) body.agent = state.draftAgent;
       Object.assign(body, state.draftPrefs);
     }
     let res = await api("POST", "/tasks", body);
@@ -1522,7 +1867,10 @@
     state.attachments = [];
     renderAttachments();
     autosize();
-    state.myTask = { task_id: res.data.task_id, session_id: state.current };
+    const shown = (override && override.label) || prompt;
+    state.myTask = { task_id: res.data.task_id, session_id: state.current, prompt: shown };
+    const early = state.earlyFinished.get(res.data.task_id);
+    if (early) { state.earlyFinished.delete(res.data.task_id); setTimeout(() => onTaskFinished(early), 0); }
     if (res.data.waiting_reason) showQueued(res.data.task_id);
     state.busySend = false;
     // optimistic user bubble; replaced by the persisted transcript when the task ends
@@ -1535,14 +1883,47 @@
       images.forEach((item) => { const pic = el("img", "pic"); pic.alt = "图片"; pic.src = item.url; pics.appendChild(pic); });
       bubble.appendChild(pics);
     }
-    if (prompt) {
+    if (shown) {
       const text = el("div");
-      renderBody(text, "user", prompt);
+      renderBody(text, "user", shown);
       bubble.appendChild(text);
     }
     wrap.appendChild(bubble);
     $("messages").appendChild(wrap);
     if (stick) scrollDown();
+    renderHeader();
+  }
+
+  async function steerTask() {
+    const s = currentSession();
+    const taskId = (state.myTask && state.myTask.task_id) || (s && s.busy_task);
+    const prompt = $("input").value.trim();
+    if (!taskId || !prompt) return;
+    const res = await api("POST", `/tasks/${taskId}/steer`, { prompt });
+    if (!res.ok) {
+      if (res.status === 404 || res.status === 409) { state.myTask = null; setSending(false); await loadSessions(); applyComposerState(); }   // the task is already gone
+      toast("插话失败:" + (res.data.error || res.status));
+      return;
+    }
+    $("input").value = "";
+    autosize();
+    applyComposerState();
+    const wrap = el("div", "msg user");
+    const bubble = el("div", "bubble");
+    renderBody(bubble, "user", prompt);
+    wrap.append(el("div", "src", "插话"), bubble);
+    $("messages").appendChild(wrap);
+    scrollDown();
+  }
+
+  // a Codex session held by the editor: continue it in a copy instead
+  async function forkSession(sessionId, prompt) {
+    const res = await api("POST", "/tasks", { prompt, session_id: sessionId, mode: currentMode(), force: true });
+    if (!res.ok) { toast("分叉失败:" + (res.data.error || res.status)); return; }
+    state.myTask = { task_id: res.data.task_id, session_id: null, fork_of: sessionId, prompt };
+    const early = state.earlyFinished.get(res.data.task_id);
+    if (early) { state.earlyFinished.delete(res.data.task_id); setTimeout(() => onTaskFinished(early), 0); }
+    state.current = null;
     renderHeader();
   }
 
@@ -1556,12 +1937,14 @@
 
   $("composer").addEventListener("submit", (event) => {
     event.preventDefault();
-    if (isRunning()) stopTask(); else send();
+    if (isRunning() && canSteer() && $("input").value.trim()) steerTask();
+    else if (isRunning()) stopTask(); else send();
   });
   $("input").addEventListener("keydown", (event) => {
     if (event.key === "Enter" && !event.shiftKey && !event.isComposing && event.keyCode !== 229) {
       event.preventDefault();
       if (!isRunning()) send();
+      else if (canSteer() && $("input").value.trim()) steerTask();
     }
   });
   function autosize() {
@@ -1605,6 +1988,15 @@
   $("attachBtn").appendChild(icon("attach", 18));
   $("slashBtn").appendChild(icon("slash", 18));
   document.querySelector(".heroMark").appendChild(icon("spark", 44));
+
+  $("agentBtn").addEventListener("click", () => {
+    const i = state.agents.indexOf(state.draftAgent);
+    state.draftAgent = state.agents[(i + 1) % state.agents.length];
+    localStorage.setItem(AGENT_KEY, state.draftAgent);
+    state.draftPrefs = {};
+    state.cmds = null;
+    renderHeader();
+  });
 
   $("cwdBtn").addEventListener("click", () => {
     const dirs = [...new Set([state.draftCwd, ...state.workspaces, state.workspace, ...state.sessions.map((s) => s.cwd)].filter(Boolean))];
@@ -1761,6 +2153,10 @@
     const info = res && res.ok ? await res.json().catch(() => null) : null;
     const on = Boolean(info && info.feishu);
     $("feishuBtn").hidden = !on;
+    // inside Feishu the token form only confuses people: Feishu login is the way in
+    const feishuOnly = on && /Lark|Feishu/i.test(navigator.userAgent);
+    $("tokenInput").hidden = $("tokenInput").disabled = $("tokenBtn").hidden = feishuOnly;
+    if (feishuOnly) $("loginHint").textContent = "请用飞书登录。登录后会看到这个飞书账号已绑定的电脑。";
     return on;
   }
 

@@ -51,11 +51,12 @@ class BridgeCase(unittest.TestCase):
         cls.registry = cls.tmp / "registry"
         cls.registry.mkdir()
         cls.port = free_port()
-        env = dict(os.environ, BRIDGE_PORT=str(cls.port), BRIDGE_TOKEN=TOKEN,
+        env = {k: v for k, v in os.environ.items() if not k.startswith("BRIDGE_")}
+        env.update(BRIDGE_PORT=str(cls.port), BRIDGE_TOKEN=TOKEN,
                    BRIDGE_STATE_DIR=str(cls.tmp / "state"), CLAUDE_BIN=str(fake),
                    CLAUDE_PROJECTS_DIR=str(cls.projects), FAKE_SLEEP_BIN=str(cls.sleep_bin),
                    CLAUDE_FAKE_LOG=str(cls.claude_log), BRIDGE_ALLOWED_ROOTS=str(cls.work), BRIDGE_GUIDANCE_SETTLE="1", CLAUDE_SESSIONS_DIR=str(cls.registry), BRIDGE_APPROVAL_TIMEOUT="30", BRIDGE_FAIL_LIMIT="1000",
-                   CLAUDE_EVENTS_FILE=str(cls.tmp / "events.jsonl"))
+                   CLAUDE_EVENTS_FILE=str(cls.tmp / "events.jsonl"), BRIDGE_CODEX="0")
         env.update(cls.extra_env())
         cls.proc = subprocess.Popen(SERVER_CMD, env=env,
                                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -203,6 +204,20 @@ class WorkspaceTests(BridgeCase):
         self.assertEqual(done["status"], "succeeded")
         listed = {s["session_id"]: s for s in self.call("GET", "/sessions")[1]["sessions"]}
         self.assertEqual(listed[done["session_id"]]["cwd"], str(self.work))
+
+    def test_sessions_name_their_agent_and_the_list_names_the_agents(self):
+        sid = self.new_session()
+        data = self.call("GET", "/sessions")[1]
+        self.assertEqual(data["agents"], ["claude"])
+        self.assertEqual({s["session_id"]: s for s in data["sessions"]}[sid]["agent"], "claude")
+
+    def test_a_task_may_name_its_agent_and_an_unknown_one_is_refused(self):
+        status, task = self.call("POST", "/tasks", {"prompt": "hello", "mode": "readonly", "agent": "claude"})
+        self.assertEqual(status, 202, task)
+        self.assertEqual(self.wait(task["task_id"])["status"], "succeeded")
+        status, body = self.call("POST", "/tasks", {"prompt": "hello", "agent": "nope"})
+        self.assertEqual((status, body["error"], body["allowed"]), (400, "bad_agent", ["claude"]))
+        self.assertEqual(self.call("GET", "/commands?agent=nope")[0], 400)
 
     def test_directories_outside_the_workspace_are_refused(self):
         other = self.tmp / "other"

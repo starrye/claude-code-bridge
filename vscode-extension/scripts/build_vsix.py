@@ -19,22 +19,23 @@ from pathlib import Path
 from xml.sax.saxutils import escape
 
 ROOT = Path(__file__).resolve().parent.parent
-EXTENSION_FILES = ["extension.js", "README.md", "lib/supervisor.js", "lib/pairing-html.js", "lib/updater.js", "lib/naming.js", "lib/claude-locate.js"]
+EXTENSION_FILES = ["extension.js", "README.md", "lib/supervisor.js", "lib/pairing-html.js", "lib/updater.js", "lib/naming.js", "lib/claude-locate.js", "uninstall.js"]
 CONTENT_TYPES = {
     ".json": "application/json", ".js": "application/javascript", ".md": "text/markdown",
-    ".py": "text/x-python", ".html": "text/html", ".css": "text/css", ".vsixmanifest": "text/xml",
+    ".py": "text/x-python", ".cs": "text/plain", ".html": "text/html", ".css": "text/css", ".vsixmanifest": "text/xml",
 }
 FIXED_TIME = (2020, 1, 1, 0, 0, 0)
 
 
 RUNTIME_ENTRIES = []
-RUNTIME_DIRS = {"bridge-js": "*.js", "bridge-js/lib": "*.js", "web": "*"}
+RUNTIME_DIRS = {"bridge-js": ("*.js",), "bridge-js/lib": ("*.js", "*.cs"), "web": ("*",)}
 
 
 def runtime_files(source: Path) -> list[tuple[str, Path]]:
     files = [(f"runtime/{name}", source / name) for name in RUNTIME_ENTRIES]
-    for folder, pattern in RUNTIME_DIRS.items():
-        files += [(f"runtime/{folder}/{p.name}", p) for p in sorted((source / folder).glob(pattern)) if p.is_file()]
+    for folder, patterns in RUNTIME_DIRS.items():
+        for pattern in patterns:
+            files += [(f"runtime/{folder}/{p.name}", p) for p in sorted((source / folder).glob(pattern)) if p.is_file()]
     missing = [name for name, path in files if not path.is_file()]
     for required in ("runtime/bridge-js/server.js", "runtime/bridge-js/relay-client.js"):
         if not any(name == required for name, _ in files):
@@ -44,7 +45,8 @@ def runtime_files(source: Path) -> list[tuple[str, Path]]:
     return files
 
 
-def manifest_xml(pkg: dict) -> str:
+def manifest_xml(pkg: dict, changelog: bool = False) -> str:
+    changelog_asset = '    <Asset Type="Microsoft.VisualStudio.Services.Content.Changelog" Path="extension/CHANGELOG.md" Addressable="true" />\n' if changelog else ""
     return f"""<?xml version="1.0" encoding="utf-8"?>
 <PackageManifest Version="2.0.0" xmlns="http://schemas.microsoft.com/developer/vsx-schema/2011" xmlns:d="http://schemas.microsoft.com/developer/vsx-schema-design/2011">
   <Metadata>
@@ -69,7 +71,7 @@ def manifest_xml(pkg: dict) -> str:
   <Assets>
     <Asset Type="Microsoft.VisualStudio.Code.Manifest" Path="extension/package.json" Addressable="true" />
     <Asset Type="Microsoft.VisualStudio.Services.Content.Details" Path="extension/README.md" Addressable="true" />
-  </Assets>
+{changelog_asset}  </Assets>
 </PackageManifest>
 """
 
@@ -101,8 +103,12 @@ def main() -> None:
     if (ROOT / "update-public-key.pem").is_file():
         entries.append(("extension/update-public-key.pem", (ROOT / "update-public-key.pem").read_bytes()))
     entries += [(f"extension/{name}", path.read_bytes()) for name, path in runtime_files(Path(args.source).resolve())]
+    # the "变更日志" tab of the extension page
+    changelog = Path(args.source).resolve() / "CHANGELOG.md"
+    if changelog.is_file():
+        entries.append(("extension/CHANGELOG.md", changelog.read_bytes()))
     names = [name for name, _ in entries]
-    entries.append(("extension.vsixmanifest", manifest_xml(pkg).encode()))
+    entries.append(("extension.vsixmanifest", manifest_xml(pkg, changelog.is_file()).encode()))
     entries.append(("[Content_Types].xml", content_types_xml(names).encode()))
 
     out_dir = Path(args.out)

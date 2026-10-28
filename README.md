@@ -1,11 +1,11 @@
 # Agent Bridge
 
-用手机（飞书里的网页）远程查看、驱动你电脑上的 Claude Code：接着 VS Code / 终端里正在进行的会话继续聊，审批工具调用，看代码改动，发图片。
+用手机（飞书里的网页）远程查看、驱动你电脑上的 Claude Code 和 OpenAI Codex：接着 VS Code / 终端里正在进行的会话继续聊，审批工具调用，看代码改动，发图片。
 
-> 非官方项目，与 Anthropic 无关。Claude 是 Anthropic 的商标。
+> 非官方项目，与 Anthropic、OpenAI 无关。Claude 是 Anthropic 的商标，Codex 是 OpenAI 的商标。
 
 ```
-手机（飞书 H5）  ──▶  公网中继 relay  ◀── 出站隧道 ──  你的电脑 / 远程开发机：Bridge ──▶ claude
+手机（飞书 H5）  ──▶  公网中继 relay  ◀── 出站隧道 ──  你的电脑 / 远程开发机：Bridge ──▶ claude / codex
 ```
 
 ## 目录结构
@@ -15,11 +15,11 @@
 ```
 agent-bridge/
 ├── relay.py             入口：中继。serve 服务端 / 管理命令（含一份仅供测试使用的 Python 客户端）
-├── bridge-js/           Bridge 与中继客户端（Node，只用内置模块，运行在 Claude Code 所在的机器上）
+├── bridge-js/           Bridge 与中继客户端（Node，只用内置模块，运行在 Claude Code / Codex 所在的机器上）
 │   ├── server.js          入口：本机 Bridge（HTTP + SSE，监听 127.0.0.1）
 │   ├── relay-client.js    中继客户端：绑定、隧道、把任务完成/待审批上报给中继
 │   ├── hook-approve.js    PreToolUse Hook 脚本，向 Bridge 请求审批
-│   └── lib/               会话列表与多窗口登记、转录渲染、任务执行、审批与差异、命令、二维码
+│   └── lib/               会话列表与多窗口登记、转录渲染、任务执行、审批与差异、命令、二维码；agents.js 是 agent 的统一入口，agent-claude 与 agent-codex 各实现一个 agent，codex-* 是 Codex 的接管、转发与渲染
 ├── relay_lib/           中继的依赖
 │   ├── feishu_auth.py     飞书登录、设备与令牌
 │   └── qr.py              纯标准库的二维码生成（终端与插件面板用）
@@ -28,8 +28,10 @@ agent-bridge/
 ├── vscode-extension/    VS Code 插件（一键启动、扫码绑定、状态栏）
 ├── tests/
 │   ├── bridge/            对 bridge-js 的集成测试，以及假的 claude
+│   ├── bridge-js/         Bridge 的 Node 测试：Codex 集成（假的 codex app-server）、接管、增量读取
 │   ├── relay/             中继、Node 客户端与二维码测试
 │   ├── parity/            二维码编码器的 Python / JavaScript 逐项比对
+│   ├── e2e/               手机浏览器模拟测试（make test-phone）
 │   └── web/               手机端页面测试（需要 jsdom）
 ├── Makefile             测试、打包的统一入口
 └── README.md  CHANGELOG.md  CONTRIBUTING.md
@@ -39,15 +41,15 @@ agent-bridge/
 
 ## 背景：遇到的问题
 
-1. **人不在电脑旁，Claude Code 就停住了。** 它在等你审批一次写文件或执行命令，或者你想补一句话，但只能回到电脑前。
-2. **开发机没有公网入口。** 代码和 Claude 跑在公司内网、容器或远程服务器上，不能为了手机访问而对外开放端口。
+1. **人不在电脑旁，Claude Code / Codex 就停住了。** 它在等你审批一次写文件或执行命令，或者你想补一句话，但只能回到电脑前。
+2. **开发机没有公网入口。** 代码和 Claude Code、Codex 跑在公司内网、容器或远程服务器上，不能为了手机访问而对外开放端口。
 3. **多人使用，账号必须隔离。** 每个人有自己的电脑，一个飞书账号只能看到、操作自己绑定的那些电脑（可以不止一台，比如同时连着几个远程容器）。
 4. **自定义 API 用不了官方的远程连接。** VS Code 里的 Claude Code 只有使用官方 API 时才能远程连接（Remote Control）。配置了自定义 API（第三方或自建网关）的用户没有这条路，人一离开电脑就没法继续。
-5. **离开电脑就看不到进度。** VS Code 里的会话、Claude 改了哪些代码、贴过的图片，在手机上都没有办法查看，也没法在手机上接着对话。
+5. **离开电脑就看不到进度。** VS Code 里的会话（Claude Code 和 Codex）、它们改了哪些代码、贴过的图片，在手机上都没有办法查看，也没法在手机上接着对话。
 
 ## 方案
 
-- **Bridge**：跑在 Claude Code 所在的机器上，只监听 `127.0.0.1`。读取本机的 Claude 会话，用 `claude -p` 执行任务，把事件通过 SSE 推给页面，并接管工具调用的审批。
+- **Bridge**：跑在 Claude Code / Codex 所在的机器上，只监听 `127.0.0.1`。读取本机的 Claude 会话，用 `claude -p` 执行任务，把事件通过 SSE 推给页面，并接管工具调用的审批。装了 Codex 时，同样读取、驱动 Codex 会话（见下文“Codex”）。
 - **中继 relay**：部署在有公网地址的服务器上。负责飞书登录、账号与电脑的绑定、把手机的请求转发进对应电脑的隧道。
 - **中继客户端**：跑在用户电脑上，**主动向外**连接中继，所以用户电脑不需要开放任何入站端口。
 - **手机端 H5**：由中继提供静态页面，在飞书里打开。
@@ -60,17 +62,21 @@ agent-bridge/
 ```mermaid
 flowchart LR
     P["手机 · 飞书 H5"] -->|"HTTP"| R["中继 relay<br/>飞书登录 · 账号↔电脑绑定"]
-    C["中继客户端<br/>relay.py client"] -->|"出站 TCP 隧道<br/>HMAC 握手"| R
+    C["中继客户端<br/>bridge-js/relay-client.js"] -->|"出站 TCP 隧道<br/>HMAC 握手"| R
     C -->|"127.0.0.1:8787"| B["Bridge<br/>bridge-js/server.js"]
     B -->|"claude -p / --resume"| CC["Claude Code"]
     B --> S["~/.claude<br/>会话文件 · 运行登记"]
+    B -->|"JSON-RPC<br/>127.0.0.1 · 令牌"| X["codex app-server<br/>（装了 Codex 时）"]
+    E["VS Code 里的 Codex 面板"] -->|"转发脚本"| X
+    X --> T["~/.codex<br/>会话 · 配置"]
 ```
 
 - Bridge 只监听本机回环地址；电脑端只做出站连接。
 - 每台电脑是一个**连接器**，有自己的 id 和密钥，隧道建立时做 HMAC 握手。
-- 一个飞书账号只绑定**一个**连接器，请求只会被转发进该账号绑定的隧道，不会串到别人的电脑。
+- 一个飞书账号可以绑定**多个**连接器；每次请求只会被转发进该账号拥有且当前选中的连接器，不会串到别人的电脑。
 - 中继对请求体和响应只做转发，不读取、不保存。
 - 手机访问 Bridge 用的访问值由连接器密钥派生，中继在转发时换上，手机端拿不到 Bridge 的真实令牌。
+- Codex 与 Claude 走同一条链路，区别只在电脑内部：Bridge 通过 `codex app-server` 驱动 Codex，接管后编辑器里的 Codex 面板也连同一个共享 app-server，它只监听 `127.0.0.1` 的随机端口，带随机访问令牌（`~/.agent-bridge/`，权限 0600），不对外开放，也不经过中继。会话内容留在本机，只有手机打开、发送的那部分经中继转发（详见“Codex”）。
 
 ### 绑定流程（首次、换电脑）
 
@@ -125,6 +131,23 @@ sequenceDiagram
 - **来源标识**：会话来源分为 VS Code、终端、Agent（手机发起）。
 - **图片**：会话里的图片在手机上显示；手机端可添加最多 4 张图片，在手机上压缩后发送，Bridge 校验文件头后通过 `--input-format stream-json` 交给 Claude。
 
+### Codex
+
+电脑上找得到 `codex` 时（优先用 OpenAI Codex 扩展自带的最新版，找不到再查 `PATH`），Bridge 同时驱动 Codex；找不到就和只有 Claude 时完全一样。设 `BRIDGE_CODEX=0` 可整体关掉。
+
+- **会话与任务**：Bridge 通过 `codex app-server`（JSON-RPC）列出会话、读对话、开新会话和续聊。手机上 Claude 和 Codex 的会话混排，带小标区分；新对话可以选用哪个 agent，记住上次的选择。续聊时不用指定 agent，Bridge 按会话归属分配。模型和思考强度列表从本机 codex 读取。
+- **审批**：Codex 要执行命令或改文件时，走手机上同样的审批卡片（命令原文、行级差异，敏感文件只显示大小）。权限模式对应关系：询问 = Codex 的 `on-request`，自动 = `never`，只读 = 只读沙箱。
+- **插话与打断**：Codex 任务运行中，在输入框里写字再点按钮就是插话（`POST /tasks/<id>/steer`，Codex 的 `turn/steer`），空着点是打断。Claude 任务只能打断。
+- **和编辑器同时用一个会话（接管）**：Codex 同一个会话同时只允许一个进程写。为了让手机和 VS Code 里的 Codex 面板能同时接着用同一个会话，Bridge 启动时会接管 Codex 扩展自带的 `codex`：
+  - 把扩展目录下的 `bin/<系统>-<架构>/codex` 改名为 `codex.orig`，原位放一个转发脚本；转发脚本本体在 `~/.agent-bridge/codex-forward.js`，不随插件删除。
+  - Bridge 用 `codex.orig` 启动一个共享的 `codex app-server`，只监听 `127.0.0.1` 的随机端口，带随机访问令牌（保存在 `~/.agent-bridge/`，权限 0600）。
+  - 编辑器面板启动 codex 时实际运行转发脚本：共享服务在就连过去，和 Bridge 共用；Bridge 没在运行、共享服务连不上、或者调用的不是 `app-server`，就直接运行 `codex.orig`，和没接管一样。
+  - 第一次接管、或关掉接管后，插件会提示**重新加载窗口**，面板重新启动 codex 后才生效。Bridge 停止时共享服务也会停，正开着的 Codex 面板会报连接断开，重新加载窗口即可，之后面板用回原版 codex。
+  - 只接管识别得出的目录结构（`codex-package.json` 里 `entrypoint` 为 `bin/codex`，Windows 上为 `bin/codex.exe`），认不出就跳过并在插件日志里写明原因。Windows 上 .exe 不能换成脚本，改用系统自带的 `csc.exe` 现场编译一个很小的启动器替换 `codex.exe`（原版改名 `codex.orig.exe`），找不到 `csc.exe` 或编译失败就跳过。Codex 扩展更新后会装到新目录，下次启动 Bridge 时重新接管。
+  - 关闭：设置 `agentBridge.codexTakeover` 为 `false`，重启 Bridge 后恢复所有 Codex 扩展目录里的原版并删除 `~/.agent-bridge/` 下的文件。卸载 Agent Bridge 时也会恢复；即使恢复没执行到，转发脚本找不到共享服务就运行原版，Codex 照常能用。
+  - 这是修改其他扩展的文件，官方不支持；Codex 扩展以后改目录结构或加文件校验时可能失效。失效时退回到不接管：编辑器正开着的会话在手机上续聊会提示被占用，可以“分叉续聊”。
+- **接管不会多上传内容**：接管只改变本机进程之间怎么连，codex 照常直接调用你配置的模型服务。只有手机打开、发送的那部分内容经中继转发，和 Claude 会话一样；不用手机时，编辑器里的 Codex 对话不会发给中继。
+
 ### 斜杠命令
 
 手机端输入框里打 `/` 会弹出命令菜单，随输入过滤。命令分两类：
@@ -174,7 +197,7 @@ https://…/#s=<会话 ID>
 
 ### 一、用户：安装插件
 
-要求：Linux、macOS 或 Windows（Windows 需已装 Git for Windows，Claude Code 自己也要它）、已安装并登录 `claude`。不需要安装 Python 或 Node。
+要求：Linux、macOS 或 Windows（Windows 需已装 Git for Windows，Claude Code 自己也要它）、已安装并登录 `claude`；要用 Codex 时另装 OpenAI Codex 扩展（或 `codex` 命令）并登录。不需要安装 Python 或 Node。
 
 1. 拿到 `agent-bridge-x.y.z.vsix`（见下文“打包”），在 VS Code 里执行 `Extensions: Install from VSIX...`，或 `code --install-extension agent-bridge-x.y.z.vsix`。
 2. 在设置里填 `agentBridge.relayAddress`（管理员提供，形如 `https://relay.example.com:9010`），或首次启动时按提示输入；打包时指定了默认地址则无需填写。写成 `主机:端口` 是明文连接，仅用于内网或测试，绑定时会有警告。
@@ -189,7 +212,8 @@ https://…/#s=<会话 ID>
 | `agentBridge.autoStart` | `true` | 启动 VS Code 后自动启动 |
 | `agentBridge.computerName` | 空 | 手机上显示为 `名称@文件夹名`，空则名称用主机名。多窗口（尤其是多个容器）请设置 |
 | `agentBridge.bridgePort` | `8787` | Bridge 本机监听端口 |
-| `agentBridge.claudePath` | 空 | `claude` 路径，空则从 `PATH` 查找 |
+| `agentBridge.claudePath` | 空 | `claude` 路径，空则用 Claude Code 扩展自带的最新版本，再找不到从 `PATH` 查找 |
+| `agentBridge.codexTakeover` | `true` | 装了 OpenAI Codex 扩展时接管它自带的 codex，让编辑器和手机同时用同一个 Codex 会话（见“Codex”）。改动后重新加载窗口生效 |
 
 命令：`Agent Bridge:` 启动 / 停止 / 重启 / 重新绑定手机 / 显示绑定二维码 / 查看日志 / 检查更新。
 
@@ -282,7 +306,7 @@ systemctl status agent-bridge-relay                      # 日志：journalctl -
 
 #### 5. 验证
 
-在**自己的电脑上**（不是服务器）运行：
+在**自己的电脑上**（不是服务器）克隆或下载本仓库，然后从仓库根目录运行：
 
 ```bash
 sh deploy/verify.sh relay.example.com
@@ -384,6 +408,10 @@ node bridge-js/relay-client.js --relay https://relay.example.com:9010 --target 1
 | `BRIDGE_ALLOWED_ROOTS` | 允许新建会话的额外根目录（按 `:` 分隔） |
 | `BRIDGE_APPROVAL_TIMEOUT` | 审批等待秒数，超时按拒绝处理 |
 | `CLAUDE_BIN` | `claude` 命令路径 |
+| `CODEX_BIN` | `codex` 命令路径；插件会填 Codex 扩展自带的那个 |
+| `BRIDGE_CODEX` | 设为 `0` 时不驱动 Codex |
+| `BRIDGE_CODEX_TAKEOVER` | 设为 `0` 时不接管 Codex 扩展，并恢复已接管的原版 |
+| `AGENT_BRIDGE_HOME` | 接管用的转发脚本、共享服务地址和令牌的存放目录，默认 `~/.agent-bridge` |
 | `CLAUDE_CONFIG_DIR` | Claude 配置目录，默认 `~/.claude` |
 | `RELAY_STATE` | 中继数据目录 |
 | `RELAY_SECRET` | 连接器密钥（由客户端凭据提供） |
@@ -395,7 +423,7 @@ node bridge-js/relay-client.js --relay https://relay.example.com:9010 --target 1
 make test               # 后端 + 插件
 make test-bridge        # python3 -m unittest discover -s tests -t .（tests/bridge 起 Node 版 Bridge，tests/relay 起 Python 中继）
 make test-extension     # node --test（vscode-extension/test）
-make test-web           # 手机端页面测试，需要先在仓库根目录 npm install jsdom（node_modules 已被忽略）
+make test-web           # 手机端页面测试，需要先在仓库根目录 npm install（node_modules 已被忽略）
 ```
 
 - 测试从仓库根目录运行；`PYTHON=python3.8 make test-bridge` 可指定解释器。
@@ -466,6 +494,7 @@ git add updates/ vscode-extension/package.json CHANGELOG.md && git commit -m "re
 - 电脑名只在绑定时上报一次，之后换打开的文件夹、改 `computerName` 都不会改变手机上已有的名字，要“重新绑定手机”才更新；改过名再绑定时，旧名字的条目会留下，需要在手机上手动移除。
 - 手机上同时只操作一台电脑；切换电脑会换成那台的会话列表和审批，正在另一台上跑的任务不受影响，但不会在当前页面显示。
 - 飞书通知里的链接带了电脑 id，已经发出的旧链接（没带电脑）会在当前选中的电脑里找这个会话，找不到就只是打开页面。
-- 手机页的自动化页面测试（`tests/web/`）在 jsdom 里跑通，但 iPhone 飞书内置浏览器的实际表现仍需真机验证。
+- 手机页的自动化页面测试（`tests/web/`）在 jsdom 里跑通；`make test-phone` 另外用 Playwright 在 iPhone（Safari 内核）和 Pixel（Chrome）的手机模拟下，对着真实 Bridge 走一遍 `/` 命令、草图等流程并截图（首次需 `npm install && npx playwright install --with-deps chromium webkit`）。飞书内置浏览器、软键盘、真实触摸手感仍需真机验证。
+- Codex 走的是 `codex app-server`，官方标为实验接口，codex 升级后字段可能变化；接管 Codex 扩展依赖它当前的目录结构（见“Codex”）。
 
 更多变更见 [CHANGELOG.md](CHANGELOG.md)，参与开发见 [CONTRIBUTING.md](CONTRIBUTING.md)。

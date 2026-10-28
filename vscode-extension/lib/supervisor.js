@@ -202,6 +202,8 @@ class Supervisor extends EventEmitter {
       BRIDGE_STATE_DIR: o.stateDir,
     };
     if (o.claude) env.CLAUDE_BIN = o.claude;
+    if (o.codex) env.CODEX_BIN = o.codex;
+    if (o.codexTakeover === false) env.BRIDGE_CODEX_TAKEOVER = '0';
     if (o.workspace) env.BRIDGE_WORKSPACE = o.workspace;
     else delete env.BRIDGE_WORKSPACE;
 

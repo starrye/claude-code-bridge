@@ -147,4 +147,4 @@ class Approvals {
   }
 }
 
-module.exports = { GATED_TOOLS, MAX_COMMAND_CHARS, MAX_DIFF_LINES, MAX_DIFF_LINE_CHARS, redact, buildDiff, summarizeInput, Approvals };
+module.exports = { GATED_TOOLS, SENSITIVE_PATH, MAX_COMMAND_CHARS, MAX_DIFF_LINES, MAX_DIFF_LINE_CHARS, redact, buildDiff, summarizeInput, Approvals };

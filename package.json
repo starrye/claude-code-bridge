@@ -1,0 +1,13 @@
+{
+  "name": "agent-bridge-dev",
+  "private": true,
+  "description": "开发依赖，只用于 tests/web/（jsdom）和 tests/e2e/（手机浏览器模拟）",
+  "devDependencies": {
+    "jsdom": "24.1.3",
+    "playwright": "1.49.1"
+  },
+  "scripts": {
+    "test:web": "node --test tests/web/",
+    "test:phone": "node tests/e2e/phone.js"
+  }
+}

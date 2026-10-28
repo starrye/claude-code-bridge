@@ -11,9 +11,9 @@
 <section id="login" hidden>
   <form id="loginForm" autocomplete="off">
     <h1>Agent Bridge</h1>
-    <p>输入访问令牌以连接你的设备。令牌只保存在这个浏览器里。</p>
+    <p id="loginHint">输入访问令牌以连接你的设备。令牌只保存在这个浏览器里。</p>
     <input id="tokenInput" type="password" placeholder="访问令牌" required>
-    <button type="submit">连接</button>
+    <button id="tokenBtn" type="submit">连接</button>
     <a id="feishuBtn" class="btn" href="/auth/feishu/start" hidden>用飞书登录</a>
     <p id="loginError" class="error"></p>
   </form>
@@ -53,9 +53,24 @@
       <div class="heroMark"></div>
       <h2>Agent Bridge</h2>
       <button id="cwdBtn" type="button" class="chip"></button>
+      <button id="agentBtn" type="button" class="chip" hidden></button>
     </div>
     <div id="messages" role="log"></div>
     <div id="approvals"></div>
+
+    <div id="sketch" role="dialog" aria-label="草图" hidden>
+      <canvas id="sketchCanvas"></canvas>
+      <button id="skClose" type="button" class="skBtn skCorner" aria-label="关闭"></button>
+      <div id="skTools" class="skPill"></div>
+      <div id="skShapes" class="skPill" hidden></div>
+      <div id="skHist" class="skHist">
+        <button id="skUndo" type="button" class="skBtn" aria-label="撤销"></button>
+        <button id="skRedo" type="button" class="skBtn" aria-label="重做"></button>
+      </div>
+      <input id="skWidth" type="range" min="2" max="24" value="6" aria-label="粗细">
+      <div id="skColors"></div>
+      <button id="skDone" type="button" class="skDone" aria-label="完成"></button>
+    </div>
 
     <form id="composer">
       <div id="floatingPicker" role="listbox" hidden></div>
@@ -97,13 +112,11 @@
   </div>
 
   <div id="pairPanel" hidden>
-    <form class="sheet" id="pairForm" autocomplete="off">
-      <h2>绑定你的电脑</h2>
-      <p class="hint">在你自己的电脑上向管理员取得配对码,输入后,这台电脑会加入这个飞书账号。</p>
-      <input id="pairInput" placeholder="配对码" autocapitalize="characters" spellcheck="false" required>
-      <p id="pairError" class="error"></p>
-      <div class="row"><button type="submit">绑定</button></div>
-    </form>
+    <div class="sheet" id="pairForm">
+      <h2>请先扫码绑定电脑</h2>
+      <p class="hint">在电脑的 VS Code 里打开 Agent Bridge,用手机扫描页面上的二维码,这台电脑就会加入你的飞书账号。</p>
+      <div class="row"><button id="pairRetry" type="button">我已扫码,重新检查</button></div>
+    </div>
   </div>
 
 
